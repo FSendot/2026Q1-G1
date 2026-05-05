@@ -1,19 +1,42 @@
-# Ignore Terraform state files
+# Terraform
+**/.terraform/*
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 *.tfplan
+tfplan
+crash.log
+crash.*.log
 
-# Ignore .terraform directory
-/*/.terraform/
+# Variables (allow only example files)
+*.tfvars
+*.tfvars.json
+!*.example.tfvars
+!*.example.tfvars.json
 
-# Ignore any local override files
+# CLI configuration
+.terraformrc
+terraform.rc
+
+# Override files
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
 
-# Ignore CLI configuration files
-.terraformrc
-terraform.rc
+# Lock files: keep .terraform.lock.hcl committed; ignore everything else under .terraform
+!.terraform.lock.hcl
 
+# Secrets and keys
 *.pem
+*.key
+id_rsa*
+.env
+.env.*
+
+# Editors / IDE
+.cursor/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
