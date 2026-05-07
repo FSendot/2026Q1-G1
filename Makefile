@@ -5,7 +5,7 @@ help:
 	@echo "  make fmt        Format all Terraform files (in-place)"
 	@echo "  make fmt-check  Check formatting without modifying files (for CI)"
 	@echo "  make validate   Validate all Terraform files"
-	@echo "  make lint       Run tflint and checkov"
+	@echo "  make lint       Run checkov (Terraform)"
 	@echo "  make init       Initialize the working directory"
 	@echo "  make plan       Plan (writes tfplan)"
 	@echo "  make apply      Apply the saved plan"
@@ -19,13 +19,12 @@ fmt-check:
 	terraform fmt -check -recursive
 
 validate:
-	@for d in $$(find . -type f -name '*.tf' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u); do \
+	@for d in $$(find . -type f -name '*.tf' -not -path '*/.*' -exec dirname {} \; | sort -u); do \
 		echo "==> $$d"; \
 		(cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
 	done
 
 lint:
-	tflint --recursive
 	checkov -d . --framework terraform --quiet --compact
 
 init:

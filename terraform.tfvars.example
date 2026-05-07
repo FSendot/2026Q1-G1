@@ -1,0 +1,16 @@
+# Copy this file to terraform.tfvars and adjust values to your environment.
+# DO NOT commit terraform.tfvars (see .gitignore).
+#
+# Note: project ("itba-tp-fraud"), region ("us-east-1"), VPC CIDR
+# ("10.0.0.0/16") and AZs are intentionally not exposed as variables;
+# they are fixed in the root composition for the AWS Academy lab.
+
+# Container image pushed to the ECR repo provisioned by modules/compute.
+# Use a placeholder here; the real image is built and pushed outside Terraform.
+image_uri = ""
+
+task_cpu      = 512
+task_memory   = 1024
+desired_count = 2
+min_capacity  = 1
+max_capacity  = 10
