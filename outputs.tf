@@ -22,3 +22,18 @@ output "vpn_gateway_id" {
   description = "ID del Virtual Private Gateway adjuntado a la VPC, listo para enlazar con un futuro Customer Gateway."
   value       = module.network.vpn_gateway_id
 }
+
+output "queue_url" {
+  description = "URL de la cola principal de transacciones."
+  value       = module.queue.queue_url
+}
+
+output "queue_arn" {
+  description = "ARN de la cola principal de transacciones."
+  value       = module.queue.queue_arn
+}
+
+output "dlq_arn" {
+  description = "ARN del Dead Letter Queue."
+  value       = module.queue.dlq_arn
+}

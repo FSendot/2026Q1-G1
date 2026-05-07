@@ -48,3 +48,11 @@ module "network" {
   azs      = local.azs
   tags     = local.common_tags
 }
+
+module "queue" {
+  source = "./modules/queue"
+
+  project       = local.project
+  principal_arn = data.aws_iam_role.lab.arn
+  tags          = local.common_tags
+}
