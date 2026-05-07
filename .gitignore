@@ -25,6 +25,7 @@ override.tf.json
 
 # Lock files: keep .terraform.lock.hcl committed; ignore everything else under .terraform
 !.terraform.lock.hcl
+!terraform.tfvars.example
 
 # Secrets and keys
 *.pem
