@@ -56,3 +56,10 @@ module "queue" {
   principal_arn = data.aws_iam_role.lab.arn
   tags          = local.common_tags
 }
+
+module "data_store" {
+  source = "./modules/data_store"
+
+  project = local.project
+  tags    = local.common_tags
+}

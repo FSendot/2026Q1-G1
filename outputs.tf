@@ -37,3 +37,13 @@ output "dlq_arn" {
   description = "ARN del Dead Letter Queue."
   value       = module.queue.dlq_arn
 }
+
+output "user_behavior_table_name" {
+  description = "Nombre de la tabla DynamoDB que persiste el comportamiento histórico de usuarios."
+  value       = module.data_store.table_name
+}
+
+output "user_behavior_table_arn" {
+  description = "ARN de la tabla DynamoDB que persiste el comportamiento histórico de usuarios."
+  value       = module.data_store.table_arn
+}
