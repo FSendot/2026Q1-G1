@@ -16,16 +16,19 @@
 ├── versions.tf
 ├── backend.tf
 ├── terraform.tfvars.example
+├── ARCHITECTURE.md
 ├── docs/
 │   ├── STRUCTURE.md
 │   ├── STYLE_GUIDE.md
 │   ├── NAMING.md
 │   ├── WORKFLOW.md
 │   ├── SECURITY.md
-│   └── adr/
-│       └── 0001-record-architecture-decisions.md
+│   └── CONSIGNA.md
 ├── modules/
-│   └── <module-name>/
+│   ├── network/
+│   ├── queue/
+│   ├── data_store/
+│   └── compute/
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf
