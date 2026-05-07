@@ -41,3 +41,8 @@ id_rsa*
 *.swo
 .DS_Store
 .cursorrules
+
+# Local tooling caches and binaries (per-developer, not shared)
+.pre-commit-cache/
+.tools/
+.virtualenv-app-data/
