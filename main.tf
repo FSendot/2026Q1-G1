@@ -39,3 +39,12 @@ locals {
 
   azs = random_shuffle.azs.result
 }
+
+module "network" {
+  source = "./modules/network"
+
+  project  = local.project
+  vpc_cidr = local.vpc_cidr
+  azs      = local.azs
+  tags     = local.common_tags
+}
