@@ -1,29 +1,50 @@
-# FRAUD DETECTOR
+# Fraud Detector — IaC
 
-Terraform repository for an AWS Academy lab.
+Terraform composition that provisions an **asynchronous, serverless fraud-scoring engine** on AWS, designed to fit in a single AWS Academy lab.
 
-## Quick start
+The architecture is described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-Prerequisites:
+## What gets created
 
-- Terraform (see `versions.tf` for the pinned version)
-- AWS credentials from your AWS Academy lab session
-- `make`, `pre-commit`, `tflint`, `tfsec` (or `checkov`)
+A single composition wires four custom modules and one external module:
 
-Bootstrap the repo:
+| Path                  | Provides                                                              |
+| --------------------- | --------------------------------------------------------------------- |
+| `modules/network`     | Private-only VPC, 2 AZs, VGW, gateway + interface VPC Endpoints, SG.  |
+| `modules/queue`       | SQS Standard queue + DLQ + redrive + queue policies.                  |
+| `modules/data_store`  | DynamoDB `<project>-user-behavior` table.                             |
+| `modules/compute`     | ECR repo, ECS cluster, Fargate task + service, autoscaling on queue.  |
+| `terraform-aws-modules/vpc/aws ~> 5.13` | Base VPC, private subnets, VGW.                     |
+
+## Prerequisites
+
+- Terraform ≥ 1.9 (pinned in `versions.tf`).
+- AWS credentials from your AWS Academy lab session (`aws_access_key_id`, `aws_secret_access_key`, `aws_session_token`).
+- `make`, `pre-commit`, `tflint`, `checkov` (the `.tools/` folder bundles a couple of them).
+
+The lab provides the IAM role `LabRole`, which the composition reuses as both ECS task and execution role.
+
+## Run-book
 
 ```bash
 git clone <repo-url>
-cd <repo>
+cd fraud-detector-terraform
 pre-commit install
+```
+
+Set up your `terraform.tfvars` from the example:
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+# adjust capacity values if needed
 ```
 
 Plan and apply:
 
 ```bash
 make init
-make plan
-make apply
+make plan         # writes tfplan; review the diff carefully
+make apply        # applies the saved tfplan
 ```
 
 Tear down at the end of the lab session:
@@ -32,17 +53,24 @@ Tear down at the end of the lab session:
 make destroy
 ```
 
-## Repository map
+## Quality gates
 
-- `AGENTS.md` — instructions for AI coding agents.
+Run before opening a PR (also enforced by `pre-commit`):
+
+```bash
+make fmt          # terraform fmt -recursive
+make validate     # terraform validate per directory
+make lint         # checkov -d .
+```
+
+## Repo map
+
+- `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`, `backend.tf` — root composition.
+- `modules/` — reusable building blocks (`network`, `queue`, `data_store`, `compute`); each has its own `README.md`.
+- `ARCHITECTURE.md` — high-level architecture and trade-offs.
+- `docs/STRUCTURE.md`, `STYLE_GUIDE.md`, `NAMING.md`, `WORKFLOW.md`, `SECURITY.md`, `CONSIGNA.md` — repo conventions and the academic brief.
+- `AGENTS.md` — guardrails for AI coding agents.
 - `CONTRIBUTING.md` — branching, commits, PR checklist.
-- `docs/STRUCTURE.md` — layout of this repo.
-- `docs/STYLE_GUIDE.md` — HCL conventions.
-- `docs/NAMING.md` — naming and tagging rules.
-- `docs/WORKFLOW.md` — init/plan/apply flow.
-- `docs/SECURITY.md` — what must never be committed.
-- `modules/` — reusable building blocks.
-- `scripts/` — helper scripts referenced from Terraform or used in CI.
 
 ## License
 

@@ -48,3 +48,44 @@ module "network" {
   azs      = local.azs
   tags     = local.common_tags
 }
+
+module "queue" {
+  source = "./modules/queue"
+
+  project       = local.project
+  principal_arn = data.aws_iam_role.lab.arn
+  tags          = local.common_tags
+}
+
+module "data_store" {
+  source = "./modules/data_store"
+
+  project = local.project
+  tags    = local.common_tags
+}
+
+module "compute" {
+  source = "./modules/compute"
+
+  project = local.project
+  tags    = local.common_tags
+
+  vpc_id                     = module.network.vpc_id
+  private_subnet_ids         = module.network.private_subnet_ids
+  endpoint_security_group_id = module.network.endpoint_security_group_id
+
+  task_role_arn      = data.aws_iam_role.lab.arn
+  execution_role_arn = data.aws_iam_role.lab.arn
+
+  image_uri     = var.image_uri
+  task_cpu      = var.task_cpu
+  task_memory   = var.task_memory
+  desired_count = var.desired_count
+  min_capacity  = var.min_capacity
+  max_capacity  = var.max_capacity
+
+  queue_arn  = module.queue.queue_arn
+  queue_url  = module.queue.queue_url
+  queue_name = module.queue.queue_name
+  table_name = module.data_store.table_name
+}
