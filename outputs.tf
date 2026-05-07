@@ -47,3 +47,23 @@ output "user_behavior_table_arn" {
   description = "ARN de la tabla DynamoDB que persiste el comportamiento histórico de usuarios."
   value       = module.data_store.table_arn
 }
+
+output "ecs_cluster_name" {
+  description = "Nombre del ECS Cluster."
+  value       = module.compute.cluster_name
+}
+
+output "ecs_service_name" {
+  description = "Nombre del ECS Service que ejecuta las tasks Fargate."
+  value       = module.compute.service_name
+}
+
+output "ecr_repository_url" {
+  description = "URL del repositorio ECR donde se publica la imagen del scoring engine."
+  value       = module.compute.ecr_repository_url
+}
+
+output "log_group_name" {
+  description = "Nombre del CloudWatch Log Group del contenedor."
+  value       = module.compute.log_group_name
+}
