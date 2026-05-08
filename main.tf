@@ -89,3 +89,17 @@ module "compute" {
   queue_name = module.queue.queue_name
   table_name = module.data_store.table_name
 }
+
+# Simulación de un sitio on-premise: una VPC aparte con un EC2 strongSwan
+# que actúa de router IPsec, junto con el Customer Gateway y la conexión
+# Site-to-Site VPN contra el VGW que provee el módulo network.
+module "onprem_sim" {
+  source = "./modules/onprem_sim"
+  count  = var.enable_onprem_sim ? 1 : 0
+
+  project        = local.project
+  azs            = local.azs
+  vpn_gateway_id = module.network.vpn_gateway_id
+  aws_vpc_cidr   = module.network.vpc_cidr
+  tags           = local.common_tags
+}

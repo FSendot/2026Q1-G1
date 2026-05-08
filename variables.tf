@@ -58,3 +58,9 @@ variable "max_capacity" {
     error_message = "max_capacity debe ser al menos 1."
   }
 }
+
+variable "enable_onprem_sim" {
+  description = "Habilita la VPC simulada de on-premise con su EC2 strongSwan, Customer Gateway y conexión Site-to-Site VPN contra el VGW."
+  type        = bool
+  default     = true
+}

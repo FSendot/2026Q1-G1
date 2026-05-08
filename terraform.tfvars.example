@@ -14,3 +14,8 @@ task_memory   = 1024
 desired_count = 2
 min_capacity  = 1
 max_capacity  = 10
+
+# Set to false to skip the on-prem simulated VPC, the strongSwan EC2 router,
+# the Customer Gateway and the Site-to-Site VPN connection. Useful to keep the
+# lab footprint minimal between testing sessions.
+enable_onprem_sim = true
