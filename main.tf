@@ -29,8 +29,9 @@ resource "random_shuffle" "azs" {
 }
 
 locals {
-  project  = "itba-tp-fraud"
-  vpc_cidr = "10.0.0.0/16"
+  project         = "itba-tp-fraud"
+  vpc_cidr        = "10.0.0.0/16"
+  onprem_vpc_cidr = "192.168.0.0/16"
 
   common_tags = {
     Project   = local.project
@@ -49,12 +50,15 @@ module "network" {
   tags     = local.common_tags
 }
 
+# Cuando la simulación on-premise está activa, la cola sólo acepta
+# SendMessage desde el CIDR on-premise (vía aws:VpcSourceIp).
 module "queue" {
   source = "./modules/queue"
 
-  project       = local.project
-  principal_arn = data.aws_iam_role.lab.arn
-  tags          = local.common_tags
+  project         = local.project
+  principal_arn   = data.aws_iam_role.lab.arn
+  onprem_vpc_cidr = var.enable_onprem_sim ? local.onprem_vpc_cidr : ""
+  tags            = local.common_tags
 }
 
 module "data_store" {
@@ -97,9 +101,11 @@ module "onprem_sim" {
   source = "./modules/onprem_sim"
   count  = var.enable_onprem_sim ? 1 : 0
 
-  project        = local.project
-  azs            = local.azs
-  vpn_gateway_id = module.network.vpn_gateway_id
-  aws_vpc_cidr   = module.network.vpc_cidr
-  tags           = local.common_tags
+  project                                = local.project
+  azs                                    = local.azs
+  vpn_gateway_id                         = module.network.vpn_gateway_id
+  aws_vpc_cidr                           = module.network.vpc_cidr
+  onprem_vpc_cidr                        = local.onprem_vpc_cidr
+  sqs_vpc_endpoint_network_interface_ids = module.network.sqs_vpc_endpoint_network_interface_ids
+  tags                                   = local.common_tags
 }

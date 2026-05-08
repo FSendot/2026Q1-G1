@@ -60,7 +60,7 @@ variable "max_capacity" {
 }
 
 variable "enable_onprem_sim" {
-  description = "Habilita la VPC simulada de on-premise con su EC2 strongSwan, Customer Gateway y conexión Site-to-Site VPN contra el VGW."
+  description = "Habilita la VPC simulada de on-premise con su EC2 strongSwan, Customer Gateway, conexión Site-to-Site VPN contra el VGW, la Private Hosted Zone para SQS y el lockdown de la cola al CIDR on-premise."
   type        = bool
   default     = true
 }
