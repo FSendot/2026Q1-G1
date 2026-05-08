@@ -370,13 +370,8 @@ Resources:
         ImageId: !Ref pAmiId
         IamInstanceProfile:
           Arn: !Sub "arn:aws:iam::${AWS::AccountId}:instance-profile/LabInstanceProfile"
-        NetworkInterfaces:
-          - DeviceIndex: 0
-            DeleteOnTermination: true
-            Description: !Sub '${pSystem}-${pApp}-${pEnvPurpose}'
-            Groups:
-              - !Ref rInstanceSecurityGroup
-            AssociatePublicIpAddress: !Ref pUseElasticIp
+        # NIC config intencionalmente movido a rVpnGatewayEni (recurso AWS::EC2::NetworkInterface)
+        # para poder exportar su ID via Outputs y consumirlo desde Terraform sin data lookups.
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash -x
@@ -899,12 +894,27 @@ Resources:
                 systemctl enable bgpd &&
                 systemctl start  bgpd
 
+  # ENI primaria del VPN gateway, declarada como recurso explicito para poder
+  # exportar su ID via Outputs y usarla como next-hop de las rutas estaticas
+  # del lado on-premise sin recurrir a data sources de Terraform.
+  rVpnGatewayEni:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: !Sub '${pSystem}-${pApp}-${pEnvPurpose}-eni'
+      SubnetId: !Ref pSubnetId
+      SourceDestCheck: false
+      GroupSet:
+        - !Ref rInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${pSystem}-${pApp}-${pEnvPurpose}-eni'
+
   rVpnGatewayEipAssociation:
     Type: AWS::EC2::EIPAssociation
     Condition: cUseElasticIp
     Properties:
       AllocationId: !Ref pEipAllocationId
-      InstanceId: !Ref rVpnGateway
+      NetworkInterfaceId: !Ref rVpnGatewayEni
 
   rVpnGateway:
     Type: AWS::EC2::Instance
@@ -917,8 +927,7 @@ Resources:
             [ rLaunchTemplate, LatestVersionNumber ]
       NetworkInterfaces:
         - DeviceIndex: '0'
-          SubnetId: !Ref pSubnetId
-      SourceDestCheck: false
+          NetworkInterfaceId: !Ref rVpnGatewayEni
       Tags:
         - Key: Name
           Value: !Sub '${pSystem}-${pApp}-${pEnvPurpose}'
@@ -940,3 +949,12 @@ Resources:
     Properties:
       LogGroupName: !Sub '/${pSystem}/${pApp}/ec2/${pEnvPurpose}'
       RetentionInDays: 30
+
+Outputs:
+  VpnGatewayInstanceId:
+    Description: ID de la EC2 que actua de VPN gateway strongSwan.
+    Value: !Ref rVpnGateway
+
+  VpnGatewayPrimaryEniId:
+    Description: ID de la ENI primaria del VPN gateway. Usar como next-hop en la route table on-premise.
+    Value: !Ref rVpnGatewayEni
