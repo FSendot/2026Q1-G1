@@ -71,6 +71,17 @@ variable "instance_type" {
   }
 }
 
+variable "sqs_vpc_endpoint_network_interface_ids" {
+  description = "IDs de las ENIs del Interface VPC Endpoint de SQS en la VPC AWS. Cuando la lista no es vacía, el módulo crea una Private Hosted Zone para sqs.<region>.amazonaws.com con un A record apuntando a las IPs privadas de esas ENIs."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for id in var.sqs_vpc_endpoint_network_interface_ids : can(regex("^eni-[0-9a-f]+$", id))])
+    error_message = "Cada elemento de sqs_vpc_endpoint_network_interface_ids debe tener el formato eni-<hex>."
+  }
+}
+
 variable "tags" {
   description = "Tags comunes a propagar a todos los recursos creados por el módulo (mergeados con tags específicos)."
   type        = map(string)
