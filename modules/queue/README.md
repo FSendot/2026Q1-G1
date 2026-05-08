@@ -10,6 +10,7 @@ Provisions the SQS Standard queue that decouples the producer (transaction inges
 - `aws_sqs_queue_policy.{main,dlq}` — least-privilege policies that:
   - Allow the supplied `principal_arn` (LabRole) to publish and consume.
   - Deny any access over plain HTTP (`aws:SecureTransport = false`).
+  - When `var.onprem_vpc_cidr` is set, the main queue **denies `sqs:SendMessage`** unless the request's `aws:VpcSourceIp` is inside that CIDR. With `NotIpAddressIfExists` semantics, requests that lack the `aws:VpcSourceIp` key (i.e., did not come through a VPC Endpoint, e.g. public internet) are also denied. The net effect: the queue accepts new messages **only from the on-prem site** through the Site-to-Site VPN. Fargate consumers (`ReceiveMessage`/`DeleteMessage`) are unaffected.
 
 ## Inputs
 
@@ -22,6 +23,7 @@ Provisions the SQS Standard queue that decouples the producer (transaction inges
 | `visibility_timeout_seconds`    | `number`      | `60`        | Visibility timeout of the main queue.                                |
 | `message_retention_seconds`     | `number`      | `345600`    | Retention of the main queue (4 days).                                |
 | `dlq_message_retention_seconds` | `number`      | `1209600`   | Retention of the DLQ (14 days).                                      |
+| `onprem_vpc_cidr`               | `string`      | `""`        | CIDR of the simulated on-prem VPC. When non-empty, the policy denies `sqs:SendMessage` unless the source IP is inside that CIDR (via `aws:VpcSourceIp`). Producers must therefore arrive from the on-prem site through the Site-to-Site VPN. |
 
 ## Outputs
 

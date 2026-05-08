@@ -67,3 +67,14 @@ variable "dlq_message_retention_seconds" {
     error_message = "dlq_message_retention_seconds debe estar entre 60 y 1209600 (14 días)."
   }
 }
+
+variable "onprem_vpc_cidr" {
+  description = "CIDR de la VPC on-premise simulada. Cuando es no vacío, la política de la cola deniega sqs:SendMessage salvo que la IP origen pertenezca a ese CIDR (vía aws:VpcSourceIp), restringiendo así la producción de mensajes exclusivamente al sitio on-premise."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.onprem_vpc_cidr == "" || can(cidrhost(var.onprem_vpc_cidr, 0))
+    error_message = "onprem_vpc_cidr debe ser un bloque CIDR IPv4 válido o quedar vacío para desactivar la restricción."
+  }
+}
