@@ -33,6 +33,11 @@ output "interface_endpoint_ids" {
   value       = { for k, v in aws_vpc_endpoint.interface : k => v.id }
 }
 
+output "sqs_vpc_endpoint_network_interface_ids" {
+  description = "IDs de las ENIs del Interface VPC Endpoint de SQS (una por subnet privada)."
+  value       = tolist(aws_vpc_endpoint.interface["sqs"].network_interface_ids)
+}
+
 output "gateway_endpoint_ids" {
   description = "Mapa de Gateway VPC Endpoints provisionados, indexado por servicio (s3, dynamodb)."
   value       = { for k, v in aws_vpc_endpoint.gateway : k => v.id }

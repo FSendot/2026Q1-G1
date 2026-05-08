@@ -15,7 +15,11 @@ The module is intentionally minimal — single AZ, permissive security group, no
 - `aws_customer_gateway.cgw` — `bgp_asn = 65000` (matches `pLocalBgpAsn` default of the template), `type = "ipsec.1"`, `ip_address = aws_eip.gw.public_ip`.
 - `aws_vpn_connection.vpn` — BGP-based (`static_routes_only = false`) Site-to-Site VPN between `var.vpn_gateway_id` and the customer gateway above. AWS auto-generates two tunnels with their PSKs and inside `/30` link networks.
 - `aws_secretsmanager_secret.tunnel{1,2}` + `aws_secretsmanager_secret_version.tunnel{1,2}` — store each tunnel's PSK as `{"psk": "<value>"}`, matching the `jq -r '.SecretString' | jq -r '.psk'` parser in the CFN template's `set-psk.sh`.
-- `aws_cloudformation_stack.strongswan` — deploys [`templates/vpn-gateway-strongswan.yml`](../../templates/vpn-gateway-strongswan.yml). All tunnel/BGP/EIP/VPC parameters are wired from the resources above.
+- `aws_cloudformation_stack.strongswan` — deploys [`templates/vpn-gateway-strongswan.yml`](../../templates/vpn-gateway-strongswan.yml). All tunnel/BGP/EIP/VPC parameters are wired from the resources above. The template declares the EC2's primary NIC as a dedicated `AWS::EC2::NetworkInterface` (`rVpnGatewayEni`) and exposes its ID via the stack `Outputs` (`VpnGatewayInstanceId`, `VpnGatewayPrimaryEniId`), so Terraform can consume the ENI ID without any post-creation data lookup.
+- `aws_route.to_aws_vpc` — adds `var.aws_vpc_cidr → strongSwan ENI` to `aws_route_table.public`. The next-hop is read directly from `aws_cloudformation_stack.strongswan.outputs["VpnGatewayPrimaryEniId"]`. Without this static route, on-prem traffic destined for AWS-side private IPs (in particular the SQS VPCE ENIs) would not enter the VPN.
+- `data.aws_network_interface.sqs_vpce` — `for_each` over the SQS VPCE ENI IDs received as input, used to read each ENI's `private_ip`.
+- `aws_route53_zone.sqs_private` — Private Hosted Zone scoped to `sqs.<region>.amazonaws.com`, associated **only** with the on-prem VPC. Coexists with the AWS-managed PHZ that `private_dns_enabled = true` creates inside the AWS VPC; Route 53 supports two PHZs with the same name on disjoint VPC associations.
+- `aws_route53_record.sqs_apex` — A record at the zone apex with the list of private IPs of the SQS VPCE ENIs (TTL 60s).
 
 ## Inputs
 
@@ -28,6 +32,7 @@ The module is intentionally minimal — single AZ, permissive security group, no
 | `onprem_vpc_cidr`           | `string`       | `"192.168.0.0/16"`   | CIDR of the simulated on-prem VPC. Must not overlap `aws_vpc_cidr`.                          |
 | `onprem_public_subnet_cidr` | `string`       | `"192.168.1.0/24"`   | CIDR of the public subnet that hosts the strongSwan EC2.                                     |
 | `instance_type`             | `string`       | `"t3a.micro"`        | EC2 type for the VPN gateway. Restricted to the values allowed by the CFN template.          |
+| `sqs_vpc_endpoint_network_interface_ids` | `list(string)` | `[]`    | ENIs of the SQS Interface VPC Endpoint in the AWS VPC. When non-empty, the module creates the SQS PHZ + apex A record. |
 | `tags`                      | `map(string)`  | `{}`                 | Common tags merged with `Component = "onprem-sim"`.                                          |
 
 ## Outputs
@@ -49,4 +54,5 @@ The module is intentionally minimal — single AZ, permissive security group, no
 - **PSK handling.** `aws_vpn_connection.tunnel{1,2}_preshared_key` is sensitive throughout; it is only ever read into `aws_secretsmanager_secret_version.secret_string` and never surfaced as an output.
 - **AWS Academy.** The CFN template references `arn:aws:iam::<account>:instance-profile/LabInstanceProfile`, which exists in the lab account. Secrets Manager reads use the default permissions on `LabRole`/`LabInstanceProfile`.
 - **Idempotency caveat.** `aws_cloudformation_stack` triggers an UPDATE whenever any parameter changes. Because the AWS-generated PSKs and inside IPs are stable across plans (pinned in state by the `aws_vpn_connection` resource), re-running `terraform apply` with no input changes produces no diff once the first apply succeeds.
+- **Private DNS for SQS from on-prem.** The PHZ `sqs.<region>.amazonaws.com` is associated only with the on-prem VPC, so on-prem clients resolve SQS to the private IPs of the AWS-side VPCE without needing DHCP options changes or a Route 53 Resolver Inbound Endpoint. The static route `var.aws_vpc_cidr → strongSwan ENI` is what makes the resolved private IPs actually reachable through the VPN.
 - **Checkov skips.** The permissive security group (`CKV_AWS_24`, `CKV_AWS_260`), the lack of secret rotation (`CKV2_AWS_57`) and the AWS-managed KMS key on Secrets Manager (`CKV_AWS_149`) are intentional trade-offs for this academic simulation and are skipped inline with explanatory comments.
