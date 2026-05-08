@@ -6,7 +6,7 @@ The architecture is described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## What gets created
 
-A single composition wires four custom modules and one external module:
+A single composition wires five custom modules and one external module:
 
 | Path                  | Provides                                                              |
 | --------------------- | --------------------------------------------------------------------- |
@@ -14,6 +14,7 @@ A single composition wires four custom modules and one external module:
 | `modules/queue`       | SQS Standard queue + DLQ + redrive + queue policies.                  |
 | `modules/data_store`  | DynamoDB `<project>-user-behavior` table.                             |
 | `modules/compute`     | ECR repo, ECS cluster, Fargate task + service, autoscaling on queue.  |
+| `modules/onprem_sim`  | Simulated on-prem VPC + EC2 strongSwan router + CGW + Site-to-Site VPN. Toggle via `var.enable_onprem_sim` (default `true`). |
 | `terraform-aws-modules/vpc/aws ~> 5.13` | Base VPC, private subnets, VGW.                     |
 
 ## Prerequisites

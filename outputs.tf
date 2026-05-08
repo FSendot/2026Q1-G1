@@ -67,3 +67,33 @@ output "log_group_name" {
   description = "Nombre del CloudWatch Log Group del contenedor."
   value       = module.compute.log_group_name
 }
+
+output "onprem_vpc_id" {
+  description = "Identificador de la VPC simulada de on-premise (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].onprem_vpc_id, null)
+}
+
+output "onprem_vpc_cidr" {
+  description = "Bloque CIDR de la VPC simulada de on-premise (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].onprem_vpc_cidr, null)
+}
+
+output "onprem_public_subnet_id" {
+  description = "ID de la subnet pública on-premise donde corre el EC2 strongSwan (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].onprem_public_subnet_id, null)
+}
+
+output "vpn_gateway_public_ip" {
+  description = "EIP pública del router strongSwan, también usada como ip_address del Customer Gateway (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].vpn_gateway_public_ip, null)
+}
+
+output "customer_gateway_id" {
+  description = "ID del Customer Gateway que apunta al router strongSwan (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].customer_gateway_id, null)
+}
+
+output "vpn_connection_id" {
+  description = "ID de la conexión Site-to-Site VPN entre el VGW y el Customer Gateway (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].vpn_connection_id, null)
+}
