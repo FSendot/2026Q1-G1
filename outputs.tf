@@ -68,6 +68,47 @@ output "log_group_name" {
   value       = module.compute.log_group_name
 }
 
+output "sns_topic_arn" {
+  description = "ARN del topic SNS de resultados de fraude."
+  value       = module.notification.topic_arn
+}
+
+output "results_queue_url" {
+  description = "URL de la cola SQS de resultados (buffer SNS → Lambda writer)."
+  value       = module.results_writer.queue_url
+}
+
+output "results_dlq_arn" {
+  description = "ARN del DLQ de la cola de resultados."
+  value       = module.results_writer.dlq_arn
+}
+
+output "db_endpoint" {
+  description = "Endpoint completo de la instancia RDS (host:port)."
+  value       = module.data_store.db_endpoint
+}
+
+output "db_password" {
+  description = "Contraseña generada para el usuario master de RDS. Sensible; recuperar con: terraform output -raw db_password"
+  value       = random_password.db.result
+  sensitive   = true
+}
+
+output "api_endpoint" {
+  description = "URL base del HTTP API Gateway del dashboard. Endpoint: GET <api_endpoint>/transactions"
+  value       = module.api.api_endpoint
+}
+
+output "writer_lambda_name" {
+  description = "Nombre de la Lambda que escribe resultados en RDS."
+  value       = module.results_writer.lambda_function_name
+}
+
+output "api_lambda_name" {
+  description = "Nombre de la Lambda que sirve el dashboard API."
+  value       = module.api.lambda_function_name
+}
+
 output "onprem_vpc_id" {
   description = "Identificador de la VPC simulada de on-premise (null si enable_onprem_sim = false)."
   value       = try(module.onprem_sim[0].onprem_vpc_id, null)

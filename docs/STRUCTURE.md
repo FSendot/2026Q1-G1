@@ -25,10 +25,14 @@
 │   ├── SECURITY.md
 │   └── CONSIGNA.md
 ├── modules/
-│   ├── network/
-│   ├── queue/
-│   ├── data_store/
-│   └── compute/
+│   ├── network/          # VPC, subnets, VGW, VPC Endpoints (S3, DynamoDB, SQS, ECR, Logs, SNS)
+│   ├── queue/            # SQS transaction queue + DLQ (ingestion side)
+│   ├── data_store/       # DynamoDB user-behavior table + RDS PostgreSQL fraud results
+│   ├── compute/          # ECR, ECS Cluster, Fargate service, Application Auto Scaling
+│   ├── onprem_sim/       # On-prem VPC simulation: strongSwan EC2, CGW, Site-to-Site VPN
+│   ├── notification/     # SNS results topic + optional email subscription (fan-out hub)
+│   ├── results_writer/   # SQS results queue + Lambda writer (SNS → SQS → Lambda → RDS)
+│   └── api/              # Lambda + HTTP API Gateway (dashboard: GET /transactions)
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf

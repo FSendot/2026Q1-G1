@@ -64,3 +64,14 @@ variable "enable_onprem_sim" {
   type        = bool
   default     = true
 }
+
+variable "alert_email" {
+  description = "Dirección de email para recibir alertas de fraude vía SNS (protocolo email nativo de SNS). Cuando es vacío no se crea la suscripción. SNS envía un mail de confirmación al activar; el destinatario debe aceptarlo antes de recibir alertas."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@]+@[^@]+\\.[^@]+$", var.alert_email))
+    error_message = "alert_email debe ser una dirección de correo válida o quedar vacío."
+  }
+}

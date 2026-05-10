@@ -22,9 +22,14 @@ Hard constraints driving the design:
 | -------------------------------------- | ------------------ | --------- | -------------------------------------------------------------------------------------------------------------- |
 | VPC, private subnets, VGW, default SG  | `modules/network`  | external + custom | Wraps `terraform-aws-modules/vpc/aws ~> 5.13`. No NAT, no IGW.                                          |
 | Gateway VPC Endpoints (S3, DynamoDB)   | `modules/network`  | custom    | Attached to all private route tables.                                                                          |
-| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs) | `modules/network` | custom | One shared SG (`<project>-endpoints-sg`) accepts HTTPS only from the VPC CIDR.                       |
-| SQS main queue + DLQ + redrive         | `modules/queue`    | custom    | `maxReceiveCount = 5`. SSE-SQS. Queue policy restricted to LabRole.                                            |
-| DynamoDB `user_behavior` table         | `modules/data_store` | custom  | PK `user_id` (string), `PAY_PER_REQUEST`, SSE on, PITR on.                                                      |
+| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs, SNS) | `modules/network` | custom | One shared SG (`<project>-endpoints-sg`) accepts HTTPS only from the VPC CIDR. SNS endpoint added to allow Fargate and Lambda to publish without a NAT gateway. |
+| SQS main queue + DLQ + redrive         | `modules/queue`      | custom    | `maxReceiveCount = 5`. SSE-SQS. Queue policy restricted to LabRole.                                            |
+| DynamoDB `user_behavior` table         | `modules/data_store` | custom    | PK `user_id` (string), `PAY_PER_REQUEST`, SSE on, PITR on. Input to scoring.                                   |
+| RDS PostgreSQL `fraud_results` DB      | `modules/data_store` | custom    | PostgreSQL 16.3, `db.t3.micro`, private subnets, encrypted. Output of scoring. Single-AZ lab configuration.    |
+| SNS results topic                      | `modules/notification` | custom  | Fan-out hub: `<project>-results`. Delivers to SQS (buffered) and optionally to email (direct, `is_fraud=true` filter). |
+| SQS results queue + DLQ                | `modules/results_writer` | custom | Buffer between SNS and the writer Lambda. `maxReceiveCount = 3`, visibility timeout 180 s.                   |
+| Lambda results-writer                  | `modules/results_writer` | custom | Python 3.12, in VPC, triggered by SQS. Placeholder; connect to RDS with a psycopg2 layer.                   |
+| HTTP API Gateway + Lambda              | `modules/api`        | custom    | `GET /transactions`. Lambda in VPC to reach RDS. CORS enabled. Placeholder; connect to RDS.                    |
 | ECR repo                               | `modules/compute`  | custom    | `IMMUTABLE` tags, scan-on-push.                                                                                 |
 | ECS Cluster (Container Insights on)    | `modules/compute`  | custom    | Single cluster.                                                                                                 |
 | Fargate task definition                | `modules/compute`  | custom    | LabRole as both task and execution role (lab constraint).                                                       |
@@ -35,12 +40,21 @@ Hard constraints driving the design:
 
 ## 4. Data and control flow
 
+**Ingestion and scoring:**
+
 1. A producer (out of scope) calls `SendMessage` on the SQS main queue using the SQS Interface VPC Endpoint.
-2. Fargate tasks consume from the queue, look up the user's behaviour features in DynamoDB via the DynamoDB Gateway Endpoint, run scoring, and write the outcome (also via Gateway Endpoint, in a future iteration).
-3. Failures are retried via SQS visibility timeout. After `maxReceiveCount = 5` deliveries, the message moves to the DLQ.
+2. Fargate tasks consume from the queue, look up the user's behaviour features in DynamoDB via the DynamoDB Gateway Endpoint, run the scoring model, and publish the result to the SNS results topic via the SNS Interface VPC Endpoint.
+3. Failures on the ingestion queue are retried via SQS visibility timeout. After `maxReceiveCount = 5` deliveries, the message moves to the ingestion DLQ.
 4. CloudWatch Logs receives container logs through the Logs Interface Endpoint.
 5. ECR holds the container image, pulled through ECR API + DKR Endpoints.
 6. Application Auto Scaling reads the queue depth and the running task count and adjusts `desired_count` so the queue stays close to the target backlog per task.
+
+**Post-analysis (fan-out from SNS):**
+
+7. SNS delivers the fraud result to the results SQS queue (`modules/results_writer`). The SQS buffer decouples the writer Lambda from SNS and provides automatic retries (up to 3) before moving messages to the results DLQ.
+8. The results-writer Lambda is triggered by the SQS event source mapping, parses the SNS envelope, and writes the fraud result to the RDS PostgreSQL database (`modules/data_store`).
+9. The dashboard Lambda (`modules/api`) is invoked by API Gateway (`GET /transactions`) and queries RDS to serve fraud results to the dashboard client.
+10. When `var.alert_email` is set, SNS also delivers directly to the email subscription — filtered to `is_fraud = true` messages only.
 
 There is **no public ingress** to the AWS VPC. The VGW is attached and route propagation is enabled. When `var.enable_onprem_sim = true` (default), `modules/onprem_sim` provisions a separate `192.168.0.0/16` VPC with one EC2 instance running strongSwan + Quagga BGP, plus the `aws_customer_gateway` and `aws_vpn_connection` that bring up two BGP-based IPsec tunnels against the VGW. The strongSwan EC2 itself is deployed by embedding `templates/vpn-gateway-strongswan.yml` inside an `aws_cloudformation_stack`, with PSKs delivered through AWS Secrets Manager.
 
@@ -61,6 +75,6 @@ From the on-prem side, the SQS hostname `sqs.<region>.amazonaws.com` resolves pr
 | Requirement (from `docs/CONSIGNA.md`) | Where in this repo                                                                                              |
 | ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | ≥1 external module                    | `terraform-aws-modules/vpc/aws ~> 5.13` in `modules/network`.                                                    |
-| ≥1 custom module                      | `modules/network`, `modules/queue`, `modules/data_store`, `modules/compute`, `modules/onprem_sim` (5).          |
+| ≥1 custom module                      | `modules/network`, `modules/queue`, `modules/data_store`, `modules/compute`, `modules/onprem_sim`, `modules/notification`, `modules/results_writer`, `modules/api` (8). |
 | ≥4 Terraform functions                | `merge`, `format`, `cidrsubnet`, `toset`, `replace`, `length`, `can`, `cidrhost`, `jsonencode`, `contains`, `slice`. |
 | ≥3 meta-arguments                     | `for_each` (gateway and interface endpoints), `lifecycle { ignore_changes }` (ECS service `desired_count`, CFN stack `pAmiId`), `depends_on` (service → SG egress rule, CFN stack → secret versions + VPN), `count` (`module.onprem_sim`), plus `validation` blocks on every variable. |
