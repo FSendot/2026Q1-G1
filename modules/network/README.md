@@ -12,7 +12,7 @@ The module is intentionally narrow: it does not create NAT gateways, IGWs, or pu
   - The VGW attached to the VPC, with route propagation enabled on private route tables (ready for a future Customer Gateway / `aws_vpn_connection`).
   - The default security group locked down (no ingress, no egress).
 - Provisions Gateway VPC Endpoints for **S3** and **DynamoDB**, attached to all private route tables.
-- Provisions Interface VPC Endpoints for **SQS**, **ECR API**, **ECR DKR**, and **CloudWatch Logs** in each private subnet, all sharing one security group.
+- Provisions Interface VPC Endpoints for **SQS**, **ECR API**, **ECR DKR**, **CloudWatch Logs**, and **SNS** in each private subnet, all sharing one security group. The SNS endpoint allows Fargate tasks and Lambda functions to publish to SNS topics without a NAT gateway.
 - Creates a dedicated SG `<project>-endpoints-sg` that accepts HTTPS only from the VPC CIDR.
 
 ## Inputs
@@ -34,7 +34,7 @@ The module is intentionally narrow: it does not create NAT gateways, IGWs, or pu
 | `private_route_table_ids`    | Private route table IDs.                                                                   |
 | `endpoint_security_group_id` | SG attached to the interface endpoints. Task SGs must allow egress to this SG on tcp/443.  |
 | `vpn_gateway_id`             | VGW ID (consumed by `modules/onprem_sim` for the Site-to-Site VPN).                        |
-| `interface_endpoint_ids`     | Map service → endpoint ID for `sqs`, `ecr_api`, `ecr_dkr`, `logs`.                         |
+| `interface_endpoint_ids`     | Map service → endpoint ID for `sqs`, `ecr_api`, `ecr_dkr`, `logs`, `sns`.                  |
 | `sqs_vpc_endpoint_network_interface_ids` | ENI IDs of the SQS Interface VPC Endpoint (one per private subnet). Passed to `modules/onprem_sim` for the SQS private zone. |
 | `gateway_endpoint_ids`       | Map service → endpoint ID for `s3`, `dynamodb`.                                            |
 
