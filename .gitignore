@@ -47,3 +47,6 @@ id_rsa*
 .pre-commit-cache/
 .tools/
 .virtualenv-app-data/
+
+# Lambda deployment packages generados por archive_file (data source de Terraform)
+**/handler.zip
