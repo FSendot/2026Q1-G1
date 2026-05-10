@@ -74,7 +74,7 @@ resource "aws_security_group" "router" {
   # checkov:skip=CKV_AWS_260: idem; el tráfico HTTP/HTTPS no se expone, pero IKE/ESP debe ser alcanzable desde el lado AWS.
   # checkov:skip=CKV2_AWS_5: SG diagnóstico no adjuntado; el SG real del EC2 lo crea el stack CFN embebido en aws_cloudformation_stack.strongswan.
   name        = format("%s-router-sg", local.name_prefix)
-  description = "SG diagnóstico del router on-premise simulado: permite IKE/ESP/AH desde Internet y todo el tráfico desde la VPC del lado AWS."
+  description = "Diagnostic security group for simulated on-prem router; IKE/ESP/AH from Internet and all traffic from AWS-side VPC."
   vpc_id      = aws_vpc.onprem.id
 
   tags = merge(local.module_tags, {
@@ -84,7 +84,7 @@ resource "aws_security_group" "router" {
 
 resource "aws_vpc_security_group_ingress_rule" "router_ike" {
   security_group_id = aws_security_group.router.id
-  description       = "IKE (UDP 500) desde Internet para negociación IPsec."
+  description       = "IKE (UDP 500) from Internet for IPsec negotiation."
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "udp"
   from_port         = 500
@@ -124,7 +124,7 @@ resource "aws_vpc_security_group_ingress_rule" "router_ah" {
 
 resource "aws_vpc_security_group_ingress_rule" "router_from_aws" {
   security_group_id = aws_security_group.router.id
-  description       = "Tráfico de retorno desde la VPC del lado AWS a través del túnel."
+  description       = "Return traffic from AWS-side VPC through the VPN tunnel."
   cidr_ipv4         = var.aws_vpc_cidr
   ip_protocol       = "-1"
 
@@ -185,7 +185,7 @@ resource "aws_secretsmanager_secret" "tunnel1" {
   # checkov:skip=CKV_AWS_149: KMS-CMK no disponible en AWS Academy; se usa la KMS managed key por defecto de Secrets Manager.
   # checkov:skip=CKV2_AWS_57: rotación automática deshabilitada de forma intencional para el laboratorio; los PSKs son efímeros junto con el stack.
   name                    = local.tunnel_psk_secret_names.tunnel1
-  description             = "PSK del túnel 1 de la conexión Site-to-Site VPN para el VPN gateway strongSwan."
+  description             = "Tunnel 1 PSK for Site-to-Site VPN (strongSwan VPN gateway)."
   recovery_window_in_days = 0
 
   tags = merge(local.module_tags, {
@@ -203,7 +203,7 @@ resource "aws_secretsmanager_secret" "tunnel2" {
   # checkov:skip=CKV_AWS_149: idem tunnel1; no hay KMS CMK disponible en el sandbox de AWS Academy.
   # checkov:skip=CKV2_AWS_57: idem tunnel1.
   name                    = local.tunnel_psk_secret_names.tunnel2
-  description             = "PSK del túnel 2 de la conexión Site-to-Site VPN para el VPN gateway strongSwan."
+  description             = "Tunnel 2 PSK for Site-to-Site VPN (strongSwan VPN gateway)."
   recovery_window_in_days = 0
 
   tags = merge(local.module_tags, {

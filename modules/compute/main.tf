@@ -88,7 +88,7 @@ resource "aws_ecs_cluster" "main" {
 
 resource "aws_security_group" "task" {
   name        = format("%s-task-sg", var.project)
-  description = "SG de las tasks Fargate; ingress vacío y egress restringido al SG de los VPC Endpoints."
+  description = "Fargate task security group; no ingress; egress to interface VPC endpoint security group only."
   vpc_id      = var.vpc_id
 
   tags = merge(local.module_tags, {
