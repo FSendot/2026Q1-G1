@@ -1,36 +1,96 @@
 # `modules/data_store`
 
-Provisions the single DynamoDB table that the fraud-scoring service uses to read user-level behavioural features.
+Provisions all persistent storage for the fraud-scoring system: a DynamoDB table for user behaviour features (read during scoring) and a PostgreSQL RDS instance for fraud results (written after scoring). Both stores live in the same module because they share the data-store concern, but they serve opposite ends of the pipeline.
 
-## Resource
+## Resources
+
+### DynamoDB — user behaviour (scoring input)
 
 - `aws_dynamodb_table.user_behavior` — `<project>-user-behavior`.
   - `billing_mode = PAY_PER_REQUEST` (no capacity planning needed for the lab).
   - `hash_key = user_id` (string), no sort key.
-  - Server-side encryption enabled (AWS-owned key, AES256).
+  - Server-side encryption enabled (AWS-owned key).
   - Point-In-Time Recovery enabled by default.
   - Deletion protection toggleable (off by default for lab cleanup).
 
+### RDS PostgreSQL — fraud results (scoring output)
+
+- `aws_db_subnet_group.results` — `<project>-results-db-subnet-group`. Spans all private subnets (≥2 AZs required by RDS, even for single-AZ deployments).
+- `aws_security_group.rds` — `<project>-rds-sg`. No ingress rules are created inside this module; they are added in the root composition to avoid circular module dependencies.
+- `aws_db_instance.results` — `<project>-results-db`.
+  - Engine: PostgreSQL 17.4, `db.t3.micro`, 20 GiB gp2.
+  - `storage_encrypted = true` (AWS-owned key; KMS-CMK not available in Academy).
+  - Single-AZ, no automated backups, `skip_final_snapshot = true` — lab cost optimisations.
+  - `lifecycle { ignore_changes = [password] }` so Terraform does not attempt to re-set the password on subsequent plans.
+
 ## Inputs
 
-| Name                            | Type          | Default       | Description                                                          |
-| ------------------------------- | ------------- | ------------- | -------------------------------------------------------------------- |
-| `project`                       | `string`      | n/a           | Prefix for the table name.                                           |
-| `tags`                          | `map(string)` | `{}`          | Common tags merged with `Component = "data-store"`.                  |
-| `hash_key_name`                 | `string`      | `"user_id"`   | Name of the partition key attribute.                                 |
-| `enable_point_in_time_recovery` | `bool`        | `true`        | Toggle PITR for the table.                                           |
-| `enable_deletion_protection`    | `bool`        | `false`       | Toggle DynamoDB deletion protection.                                 |
+| Name                            | Type           | Default           | Description                                                                       |
+| ------------------------------- | -------------- | ----------------- | --------------------------------------------------------------------------------- |
+| `project`                       | `string`       | n/a               | Prefix for all resource names.                                                    |
+| `tags`                          | `map(string)`  | `{}`              | Common tags merged with `Component = "data-store"`.                               |
+| `hash_key_name`                 | `string`       | `"user_id"`       | DynamoDB partition key attribute name.                                            |
+| `enable_point_in_time_recovery` | `bool`         | `true`            | Toggle PITR for the DynamoDB table.                                               |
+| `enable_deletion_protection`    | `bool`         | `false`           | Toggle DynamoDB deletion protection.                                              |
+| `vpc_id`                        | `string`       | n/a               | VPC where the RDS instance is deployed.                                           |
+| `private_subnet_ids`            | `list(string)` | n/a               | Private subnet IDs for the DB subnet group (≥2 required).                        |
+| `instance_class`                | `string`       | `"db.t3.micro"`   | RDS instance class.                                                               |
+| `db_name`                       | `string`       | `"fraud_results"` | Initial database name in PostgreSQL.                                              |
+| `db_username`                   | `string`       | `"fraud_admin"`   | Master username for the RDS instance.                                             |
+| `db_password`                   | `string`       | n/a               | Master password. `sensitive = true`. Generate with `random_password` in the root. |
 
 ## Outputs
 
-| Name             | Description                                       |
-| ---------------- | ------------------------------------------------- |
-| `table_name`     | Name of the DynamoDB table.                       |
-| `table_arn`      | ARN of the table.                                 |
-| `table_id`       | Internal table id (same as name).                 |
-| `hash_key_name`  | Partition key attribute name (echoed back).       |
+### DynamoDB
 
-## Notes
+| Name            | Description                                 |
+| --------------- | ------------------------------------------- |
+| `table_name`    | Name of the DynamoDB table.                 |
+| `table_arn`     | ARN of the table.                           |
+| `table_id`      | Internal table id (same as name).           |
+| `hash_key_name` | Partition key attribute name (echoed back). |
 
-- AWS Academy does not allow customer-managed KMS keys. The table uses the AWS-owned default key, which still satisfies the basic SSE requirement (Checkov `CKV_AWS_28`). KMS-CMK (`CKV_AWS_119`) is intentionally not used.
-- The TP requires only one table — there are no GSIs or LSIs by design.
+### RDS
+
+| Name                    | Description                                                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `db_address`            | RDS hostname (no port). Use as `DB_HOST` in Lambda env vars.                                                          |
+| `db_port`               | RDS port (5432).                                                                                                      |
+| `db_name`               | Initial database name.                                                                                                |
+| `db_username`           | Master username.                                                                                                      |
+| `db_endpoint`           | Full endpoint in `host:port` format.                                                                                  |
+| `rds_security_group_id` | RDS security group ID. Exposed so the root composition can add Lambda ingress rules without circular module dependencies. |
+| `db_instance_id`        | RDS instance identifier.                                                                                              |
+
+## Example
+
+```hcl
+module "data_store" {
+  source = "./modules/data_store"
+
+  project            = local.project
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  db_password        = random_password.db.result
+  tags               = local.common_tags
+}
+```
+
+Cross-module security group rules (Lambda → RDS) must be created in the root to avoid circular dependencies between `modules/data_store`, `modules/results_writer`, and `modules/api`:
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "rds_from_writer" {
+  security_group_id            = module.data_store.rds_security_group_id
+  referenced_security_group_id = module.results_writer.lambda_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+}
+```
+
+## Notes for AWS Academy
+
+- **DynamoDB**: AWS Academy does not allow customer-managed KMS keys. The table uses the AWS-owned default key (Checkov `CKV_AWS_119` skipped).
+- **RDS**: Checkov `CKV_AWS_157`, `CKV_AWS_133`, `CKV_AWS_118`, `CKV_AWS_293`, `CKV_AWS_129`, `CKV_AWS_354` are skipped — all are lab cost or Academy restriction trade-offs documented inline.
+- The RDS password is generated with `random_password` in the root composition and passed as a sensitive variable. Retrieve it with `terraform output -raw db_password`.
+- The TP requires only one DynamoDB table — there are no GSIs or LSIs by design.
