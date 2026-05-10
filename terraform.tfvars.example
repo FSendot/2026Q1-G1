@@ -19,3 +19,8 @@ max_capacity  = 10
 # the Customer Gateway and the Site-to-Site VPN connection. Useful to keep the
 # lab footprint minimal between testing sessions.
 enable_onprem_sim = true
+
+# Email address for SNS fraud alerts (native SNS email subscription, no SES required).
+# Leave empty to skip. When set, SNS sends a confirmation email that must be accepted
+# before alerts are delivered. Only messages with is_fraud=true in the body are forwarded.
+alert_email = ""
