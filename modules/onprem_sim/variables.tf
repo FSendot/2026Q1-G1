@@ -71,8 +71,19 @@ variable "instance_type" {
   }
 }
 
+variable "sqs_vpce_eni_count" {
+  description = "Cantidad de ENIs del Interface VPC Endpoint de SQS (debe coincidir con subnets del endpoint). Se usa para for_each/count con índices fijos; los IDs reales pueden ser unknown hasta apply."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.sqs_vpce_eni_count >= 0 && var.sqs_vpce_eni_count <= 8
+    error_message = "sqs_vpce_eni_count debe estar entre 0 y 8."
+  }
+}
+
 variable "sqs_vpc_endpoint_network_interface_ids" {
-  description = "IDs de las ENIs del Interface VPC Endpoint de SQS en la VPC AWS. Cuando la lista no es vacía, el módulo crea una Private Hosted Zone para sqs.<region>.amazonaws.com con un A record apuntando a las IPs privadas de esas ENIs."
+  description = "IDs de las ENIs del Interface VPC Endpoint de SQS en la VPC AWS. Debe tener al menos sqs_vpce_eni_count elementos cuando ese valor es > 0. El módulo crea PHZ sqs.<region>.amazonaws.com cuando sqs_vpce_eni_count > 0."
   type        = list(string)
   default     = []
 

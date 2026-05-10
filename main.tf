@@ -21,13 +21,6 @@ data "aws_iam_role" "lab" {
   name = "LabRole"
 }
 
-# Selecciona dos zonas de disponibilidad al azar entre las disponibles
-# en la región. Una vez aplicado, el resultado queda fijo en el state.
-resource "random_shuffle" "azs" {
-  input        = data.aws_availability_zones.available.names
-  result_count = 2
-}
-
 locals {
   project         = "itba-tp-fraud"
   vpc_cidr        = "10.0.0.0/16"
@@ -38,7 +31,9 @@ locals {
     ManagedBy = "terraform"
   }
 
-  azs = random_shuffle.azs.result
+  # Primeras dos AZs de la región (orden estable, conocido en plan) para
+  # evitar count/for_each que dependan de random_shuffle.
+  azs = slice(data.aws_availability_zones.available.names, 0, 2)
 }
 
 module "network" {
@@ -106,6 +101,7 @@ module "onprem_sim" {
   vpn_gateway_id                         = module.network.vpn_gateway_id
   aws_vpc_cidr                           = module.network.vpc_cidr
   onprem_vpc_cidr                        = local.onprem_vpc_cidr
+  sqs_vpce_eni_count                     = length(local.azs)
   sqs_vpc_endpoint_network_interface_ids = module.network.sqs_vpc_endpoint_network_interface_ids
   tags                                   = local.common_tags
 }

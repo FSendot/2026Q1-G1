@@ -287,15 +287,16 @@ resource "aws_route" "to_aws_vpc" {
 
 
 data "aws_network_interface" "sqs_vpce" {
-  for_each = toset(var.sqs_vpc_endpoint_network_interface_ids)
-  id       = each.value
+  for_each = {
+    for i in range(var.sqs_vpce_eni_count) : tostring(i) => var.sqs_vpc_endpoint_network_interface_ids[i]
+  }
+  id = each.value
 }
-
 
 resource "aws_route53_zone" "sqs_private" {
   # checkov:skip=CKV2_AWS_39: consultas DNS de la PHZ academica sin query logging por costo y alcance del lab.
   # checkov:skip=CKV2_AWS_38: zona privada solo asociada a la VPC on-premise; DNSSEC no aplica al diseno del TP.
-  count = length(var.sqs_vpc_endpoint_network_interface_ids) > 0 ? 1 : 0
+  count = var.sqs_vpce_eni_count > 0 ? 1 : 0
 
   name = format("sqs.%s.amazonaws.com", data.aws_region.current.name)
 
@@ -312,7 +313,7 @@ resource "aws_route53_zone" "sqs_private" {
 
 resource "aws_route53_record" "sqs_apex" {
   # checkov:skip=CKV2_AWS_23: A record usa records con IPs privadas del SQS VPCE; no es alias hacia recurso Terraform.
-  count = length(var.sqs_vpc_endpoint_network_interface_ids) > 0 ? 1 : 0
+  count = var.sqs_vpce_eni_count > 0 ? 1 : 0
 
   zone_id = aws_route53_zone.sqs_private[0].zone_id
   name    = aws_route53_zone.sqs_private[0].name
