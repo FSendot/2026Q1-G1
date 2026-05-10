@@ -1,0 +1,45 @@
+name: Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Escribir "apply" para confirmar el deploy'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'apply'
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_DEFAULT_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.9"
+
+      - name: Ensure state bucket exists
+        run: |
+          aws s3api head-bucket --bucket itba-tp-fraud-tfstate 2>/dev/null \
+            || aws s3api create-bucket --bucket itba-tp-fraud-tfstate --region us-east-1
+          aws s3api put-bucket-versioning \
+            --bucket itba-tp-fraud-tfstate \
+            --versioning-configuration Status=Enabled 2>/dev/null || true
+
+      - name: Init
+        run: terraform init
+
+      - name: Apply
+        run: terraform apply -auto-approve
