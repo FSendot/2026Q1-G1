@@ -5,9 +5,9 @@ locals {
     Component = "data-store"
   })
 
-  table_name          = format("%s-user-behavior", var.project)
-  db_identifier       = format("%s-results-db", var.project)
-  audit_bucket_name   = format("%s-audit-%s", var.project, data.aws_caller_identity.current.account_id)
+  table_name        = format("%s-user-behavior", var.project)
+  db_identifier     = format("%s-results-db", var.project)
+  audit_bucket_name = format("%s-audit-%s", var.project, data.aws_caller_identity.current.account_id)
 }
 
 resource "aws_dynamodb_table" "user_behavior" {
@@ -40,8 +40,8 @@ resource "aws_s3_bucket" "audit" {
   # checkov:skip=CKV_AWS_18: Access logging requeriría un bucket separado; fuera del alcance del lab.
   # checkov:skip=CKV_AWS_144: Replicación cross-region fuera del alcance del lab académico.
   # checkov:skip=CKV2_AWS_62: Notificaciones de eventos no requeridas en lab.
-  bucket        = local.audit_bucket_name
-  force_delete  = true
+  bucket       = local.audit_bucket_name
+  force_delete = true
 
   tags = merge(local.module_tags, {
     Name = local.audit_bucket_name
