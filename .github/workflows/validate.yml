@@ -19,6 +19,9 @@ jobs:
         with:
           terraform_version: "~> 1.9"
 
+      - name: Build Lambda layers
+        run: make build-layers
+
       - name: Format check
         run: terraform fmt -check -recursive
 
