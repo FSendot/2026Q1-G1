@@ -6,11 +6,12 @@ locals {
   })
 
   interface_endpoint_services = {
-    sqs     = "com.amazonaws.${data.aws_region.current.name}.sqs"
-    ecr_api = "com.amazonaws.${data.aws_region.current.name}.ecr.api"
-    ecr_dkr = "com.amazonaws.${data.aws_region.current.name}.ecr.dkr"
-    logs    = "com.amazonaws.${data.aws_region.current.name}.logs"
-    sns     = "com.amazonaws.${data.aws_region.current.name}.sns"
+    sqs            = "com.amazonaws.${data.aws_region.current.name}.sqs"
+    ecr_api        = "com.amazonaws.${data.aws_region.current.name}.ecr.api"
+    ecr_dkr        = "com.amazonaws.${data.aws_region.current.name}.ecr.dkr"
+    logs           = "com.amazonaws.${data.aws_region.current.name}.logs"
+    sns            = "com.amazonaws.${data.aws_region.current.name}.sns"
+    secretsmanager = "com.amazonaws.${data.aws_region.current.name}.secretsmanager"
   }
 
   gateway_endpoint_services = toset(["s3", "dynamodb"])

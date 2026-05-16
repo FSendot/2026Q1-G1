@@ -63,6 +63,7 @@ module "data_store" {
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
   db_password        = random_password.db.result
+  principal_arn      = data.aws_iam_role.lab.arn
   tags               = local.common_tags
 }
 
@@ -115,7 +116,7 @@ module "results_writer" {
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   sns_topic_arn              = module.notification.topic_arn
-  db_host                    = module.data_store.db_address
+  db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port
   db_name                    = module.data_store.db_name
   db_username                = module.data_store.db_username
@@ -131,7 +132,7 @@ module "api" {
   vpc_id                     = module.network.vpc_id
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
-  db_host                    = module.data_store.db_address
+  db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port
   db_name                    = module.data_store.db_name
   db_username                = module.data_store.db_username
@@ -139,9 +140,11 @@ module "api" {
   tags                       = local.common_tags
 }
 
-resource "aws_vpc_security_group_egress_rule" "writer_lambda_to_rds" {
-  security_group_id            = module.results_writer.lambda_security_group_id
-  description                  = "PostgreSQL hacia RDS results-db"
+# Proxy ↔ RDS
+
+resource "aws_vpc_security_group_egress_rule" "proxy_to_rds" {
+  security_group_id            = module.data_store.proxy_security_group_id
+  description                  = "PostgreSQL desde proxy hacia RDS"
   referenced_security_group_id = module.data_store.rds_security_group_id
   ip_protocol                  = "tcp"
   from_port                    = 5432
@@ -150,8 +153,32 @@ resource "aws_vpc_security_group_egress_rule" "writer_lambda_to_rds" {
   tags = local.common_tags
 }
 
-resource "aws_vpc_security_group_ingress_rule" "rds_from_writer_lambda" {
+resource "aws_vpc_security_group_ingress_rule" "rds_from_proxy" {
   security_group_id            = module.data_store.rds_security_group_id
+  description                  = "PostgreSQL desde RDS Proxy"
+  referenced_security_group_id = module.data_store.proxy_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+
+  tags = local.common_tags
+}
+
+# Lambda results-writer ↔ Proxy
+
+resource "aws_vpc_security_group_egress_rule" "writer_lambda_to_proxy" {
+  security_group_id            = module.results_writer.lambda_security_group_id
+  description                  = "PostgreSQL desde Lambda results-writer hacia RDS Proxy"
+  referenced_security_group_id = module.data_store.proxy_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+
+  tags = local.common_tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "proxy_from_writer_lambda" {
+  security_group_id            = module.data_store.proxy_security_group_id
   description                  = "PostgreSQL desde Lambda results-writer"
   referenced_security_group_id = module.results_writer.lambda_security_group_id
   ip_protocol                  = "tcp"
@@ -161,10 +188,12 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_writer_lambda" {
   tags = local.common_tags
 }
 
-resource "aws_vpc_security_group_egress_rule" "api_lambda_to_rds" {
+# Lambda api ↔ Proxy
+
+resource "aws_vpc_security_group_egress_rule" "api_lambda_to_proxy" {
   security_group_id            = module.api.lambda_security_group_id
-  description                  = "PostgreSQL hacia RDS results-db"
-  referenced_security_group_id = module.data_store.rds_security_group_id
+  description                  = "PostgreSQL desde Lambda API hacia RDS Proxy"
+  referenced_security_group_id = module.data_store.proxy_security_group_id
   ip_protocol                  = "tcp"
   from_port                    = 5432
   to_port                      = 5432
@@ -172,8 +201,8 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_to_rds" {
   tags = local.common_tags
 }
 
-resource "aws_vpc_security_group_ingress_rule" "rds_from_api_lambda" {
-  security_group_id            = module.data_store.rds_security_group_id
+resource "aws_vpc_security_group_ingress_rule" "proxy_from_api_lambda" {
+  security_group_id            = module.data_store.proxy_security_group_id
   description                  = "PostgreSQL desde Lambda API"
   referenced_security_group_id = module.api.lambda_security_group_id
   ip_protocol                  = "tcp"

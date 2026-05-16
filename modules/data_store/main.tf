@@ -92,3 +92,84 @@ resource "aws_db_instance" "results" {
     Name = local.db_identifier
   })
 }
+
+# Group A — Secrets Manager
+
+resource "aws_secretsmanager_secret" "db_credentials" {
+  # checkov:skip=CKV_AWS_149: AWS Academy no permite KMS CMK; cifrado con clave AWS-owned.
+  # checkov:skip=CKV2_AWS_57: Rotación automática deshabilitada; LabRole no puede crear funciones Lambda de rotación (restricción de sandbox).
+  name                    = format("%s-db-credentials", var.project)
+  recovery_window_in_days = 0
+
+  tags = merge(local.module_tags, {
+    Name = format("%s-db-credentials", var.project)
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "db_credentials" {
+  secret_id = aws_secretsmanager_secret.db_credentials.id
+  secret_string = jsonencode({
+    username = var.db_username
+    password = var.db_password
+  })
+}
+
+# Group B — Proxy Security Group
+
+resource "aws_security_group" "proxy" {
+  name        = format("%s-proxy-sg", var.project)
+  description = "RDS Proxy; ingress TCP/5432 desde Lambdas; egress TCP/5432 hacia RDS. Las reglas se definen en la composicion raiz para evitar dependencias circulares entre modulos."
+  vpc_id      = var.vpc_id
+
+  tags = merge(local.module_tags, {
+    Name = format("%s-proxy-sg", var.project)
+  })
+}
+
+# Group C — Proxy Resources
+
+resource "aws_db_proxy" "results" {
+  name                   = format("%s-results-proxy", var.project)
+  debug_logging          = false
+  engine_family          = "POSTGRESQL"
+  idle_client_timeout    = 1800
+  require_tls            = true
+  role_arn               = var.principal_arn
+  vpc_security_group_ids = [aws_security_group.proxy.id]
+  vpc_subnet_ids         = var.private_subnet_ids
+
+  auth {
+    auth_scheme = "SECRETS"
+    description = "DB credentials for fraud-results RDS"
+    iam_auth    = "DISABLED"
+    secret_arn  = aws_secretsmanager_secret.db_credentials.arn
+  }
+
+  tags = merge(local.module_tags, {
+    Name = format("%s-results-proxy", var.project)
+  })
+}
+
+resource "aws_db_proxy_default_target_group" "results" {
+  db_proxy_name = aws_db_proxy.results.name
+
+  connection_pool_config {
+    max_connections_percent      = 90
+    max_idle_connections_percent = 50
+    connection_borrow_timeout    = 120
+  }
+
+  lifecycle {
+    replace_triggered_by = [aws_db_proxy.results.id]
+  }
+}
+
+resource "aws_db_proxy_target" "results" {
+  db_instance_identifier = aws_db_instance.results.identifier
+  db_proxy_name          = aws_db_proxy.results.name
+  target_group_name      = aws_db_proxy_default_target_group.results.name
+
+  lifecycle {
+    replace_triggered_by = [aws_db_proxy.results.id]
+  }
+}

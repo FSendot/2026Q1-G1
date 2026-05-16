@@ -85,3 +85,8 @@ variable "db_password" {
   type        = string
   sensitive   = true
 }
+
+variable "principal_arn" {
+  description = "ARN del rol IAM que el proxy utiliza para leer las credenciales de Secrets Manager (en AWS Academy, siempre LabRole)."
+  type        = string
+}

@@ -52,3 +52,13 @@ output "db_instance_id" {
   description = "Identificador de la instancia RDS."
   value       = aws_db_instance.results.identifier
 }
+
+output "proxy_endpoint" {
+  description = "Hostname del endpoint del RDS Proxy; usar como DB_HOST en las Lambdas en lugar del endpoint directo de RDS."
+  value       = aws_db_proxy.results.endpoint
+}
+
+output "proxy_security_group_id" {
+  description = "ID del Security Group del RDS Proxy; expuesto para que la composición raíz agregue las reglas de ingress/egress desde las Lambdas."
+  value       = aws_security_group.proxy.id
+}
