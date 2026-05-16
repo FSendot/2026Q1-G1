@@ -98,6 +98,18 @@ resource "random_password" "db" {
   special = false
 }
 
+resource "aws_lambda_layer_version" "psycopg2" {
+  filename                 = "layers/psycopg2/psycopg2-layer.zip"
+  layer_name               = format("%s-psycopg2", local.project)
+  source_code_hash         = filebase64sha256("layers/psycopg2/psycopg2-layer.zip")
+  compatible_runtimes      = ["python3.12"]
+  compatible_architectures = ["x86_64"]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 module "notification" {
   source = "./modules/notification"
 
@@ -116,6 +128,7 @@ module "results_writer" {
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   sns_topic_arn              = module.notification.topic_arn
+  psycopg2_layer_arn         = aws_lambda_layer_version.psycopg2.arn
   db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port
   db_name                    = module.data_store.db_name
@@ -132,6 +145,7 @@ module "api" {
   vpc_id                     = module.network.vpc_id
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
+  psycopg2_layer_arn         = aws_lambda_layer_version.psycopg2.arn
   db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port
   db_name                    = module.data_store.db_name

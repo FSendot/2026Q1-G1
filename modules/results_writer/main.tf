@@ -170,7 +170,8 @@ resource "aws_lambda_function" "writer" {
   runtime       = "python3.12"
   handler       = "handler.handler"
   timeout       = 30
-  memory_size   = 128
+  memory_size   = 256
+  layers        = [var.psycopg2_layer_arn]
 
   filename         = data.archive_file.writer_handler.output_path
   source_code_hash = data.archive_file.writer_handler.output_base64sha256
