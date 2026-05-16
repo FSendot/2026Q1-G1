@@ -99,6 +99,11 @@ output "api_endpoint" {
   value       = module.api.api_endpoint
 }
 
+output "proxy_endpoint" {
+  description = "Endpoint del RDS Proxy; las Lambdas se conectan aquí en lugar de directamente a RDS."
+  value       = module.data_store.proxy_endpoint
+}
+
 output "writer_lambda_name" {
   description = "Nombre de la Lambda que escribe resultados en RDS."
   value       = module.results_writer.lambda_function_name

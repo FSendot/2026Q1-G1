@@ -30,17 +30,23 @@ The lab provides the IAM role `LabRole`, which the composition reuses as both EC
 
 ## First-time bootstrap
 
-The Terraform state is stored in an S3 bucket (`itba-tp-fraud-tfstate`). The bucket must exist before the first `terraform init`. This is a one-time step per AWS account — once created, all team members share the same bucket.
+The Terraform state is stored in an S3 bucket named after your AWS account ID (`terraform-state-<account-id>`). The bucket must exist before the first `terraform init` — this is a one-time step per AWS Academy account.
+
+Since each team member has their own lab account, **everyone** must run this once:
 
 ```bash
-aws s3api create-bucket --bucket itba-tp-fraud-tfstate --region us-east-1
-aws s3api put-bucket-versioning \
-  --bucket itba-tp-fraud-tfstate \
-  --versioning-configuration Status=Enabled
-terraform init -migrate-state   # migrates any existing local state to S3
-```
+# 1. Find your account ID and copy it to the clipboard
+aws sts get-caller-identity --query Account --output text
 
-If you are starting from scratch with no prior local state, `terraform init` (without `-migrate-state`) is enough.
+# 2. Create the state bucket (replace <account-id> with the output above)
+aws s3api create-bucket --bucket terraform-state-<account-id> --region us-east-1
+aws s3api put-bucket-versioning \
+  --bucket terraform-state-<account-id> \
+  --versioning-configuration Status=Enabled
+
+# 3. Initialise Terraform (starting from scratch)
+terraform init -reconfigure
+```
 
 > **GitHub Actions** (plan / apply workflows) create the bucket automatically if it does not exist. No manual step is needed when running through CI.
 
