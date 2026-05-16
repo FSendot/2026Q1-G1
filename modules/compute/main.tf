@@ -29,6 +29,7 @@ locals {
         { name = "QUEUE_URL", value = var.queue_url },
         { name = "QUEUE_NAME", value = var.queue_name },
         { name = "TABLE_NAME", value = var.table_name },
+        { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
       ]
 
       logConfiguration = {

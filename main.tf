@@ -87,10 +87,11 @@ module "compute" {
   min_capacity  = var.min_capacity
   max_capacity  = var.max_capacity
 
-  queue_arn  = module.queue.queue_arn
-  queue_url  = module.queue.queue_url
-  queue_name = module.queue.queue_name
-  table_name = module.data_store.table_name
+  queue_arn     = module.queue.queue_arn
+  queue_url     = module.queue.queue_url
+  queue_name    = module.queue.queue_name
+  table_name    = module.data_store.table_name
+  sns_topic_arn = module.notification.topic_arn
 }
 
 resource "random_password" "db" {

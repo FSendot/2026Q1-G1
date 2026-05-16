@@ -125,6 +125,11 @@ variable "table_name" {
   type        = string
 }
 
+variable "sns_topic_arn" {
+  description = "ARN del topic SNS donde el contenedor publica los resultados de scoring; pasado como variable de entorno SNS_TOPIC_ARN."
+  type        = string
+}
+
 variable "log_retention_days" {
   description = "Cantidad de días que se retienen los logs del contenedor en CloudWatch Logs."
   type        = number
