@@ -28,7 +28,14 @@ lint:
 	checkov -d . --framework terraform --quiet --compact
 
 init:
-	terraform init
+	ACCOUNT_ID=$$(aws sts get-caller-identity --query Account --output text) && \
+	BUCKET="itba-tp-fraud-tfstate-$${ACCOUNT_ID}" && \
+	(aws s3api head-bucket --bucket "$${BUCKET}" 2>/dev/null || \
+	  aws s3api create-bucket --bucket "$${BUCKET}" --region us-east-1) && \
+	aws s3api put-bucket-versioning \
+	  --bucket "$${BUCKET}" \
+	  --versioning-configuration Status=Enabled && \
+	terraform init -migrate-state -force-copy -backend-config="bucket=$${BUCKET}"
 
 plan:
 	terraform plan -out=tfplan

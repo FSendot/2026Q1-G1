@@ -30,16 +30,16 @@ jobs:
         with:
           terraform_version: "~> 1.9"
 
-      - name: Ensure state bucket exists
-        run: |
-          aws s3api head-bucket --bucket itba-tp-fraud-tfstate 2>/dev/null \
-            || aws s3api create-bucket --bucket itba-tp-fraud-tfstate --region us-east-1
-          aws s3api put-bucket-versioning \
-            --bucket itba-tp-fraud-tfstate \
-            --versioning-configuration Status=Enabled 2>/dev/null || true
-
       - name: Init
-        run: terraform init
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="itba-tp-fraud-tfstate-${ACCOUNT_ID}"
+          aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null || \
+            aws s3api create-bucket --bucket "${BUCKET}" --region us-east-1
+          aws s3api put-bucket-versioning \
+            --bucket "${BUCKET}" \
+            --versioning-configuration Status=Enabled
+          terraform init -migrate-state -force-copy -backend-config="bucket=${BUCKET}"
 
       - name: Apply
         run: terraform apply -auto-approve

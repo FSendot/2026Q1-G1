@@ -1,6 +1,7 @@
 terraform {
+  # Partial backend config — bucket is derived at init time from the AWS account ID.
+  # Run: make init
   backend "s3" {
-    bucket = "itba-tp-fraud-tfstate"
     key    = "terraform.tfstate"
     region = "us-east-1"
   }
