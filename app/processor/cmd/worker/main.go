@@ -11,6 +11,7 @@ import (
 
 	"github.com/FSendot/fraud-detector/processor/internal/dynamo"
 	"github.com/FSendot/fraud-detector/processor/internal/scoring"
+	"github.com/FSendot/fraud-detector/processor/internal/store"
 	fraudruntime "github.com/FSendot/fraud-detector/net/serving/go/pkg/fraudruntime"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -44,6 +45,13 @@ type ScoringResult struct {
 	UserID        string  `json:"user_id"`
 	FraudScore    float64 `json:"fraud_score"`
 	IsFraud       bool    `json:"is_fraud"`
+}
+
+// AuditEvent is written to S3 for full traceability.
+type AuditEvent struct {
+	Transaction   Transaction   `json:"transaction"`
+	ScoringResult ScoringResult `json:"scoring_result"`
+	ProcessedAt   string        `json:"processed_at"`
 }
 
 // scorer abstracts ML engine and rule-based fallback behind a single interface.
@@ -93,13 +101,24 @@ func main() {
 	sqsClient := sqs.NewFromConfig(cfg)
 	snsClient := sns.NewFromConfig(cfg)
 
+	var s3Client *store.S3Client
+	if os.Getenv("S3_AUDIT_BUCKET") != "" {
+		var err error
+		s3Client, err = store.NewS3Client(cfg)
+		if err != nil {
+			log.Printf("WARNING: failed to initialize S3 audit client: %v", err)
+		} else {
+			log.Printf("S3 audit enabled — bucket=%s", os.Getenv("S3_AUDIT_BUCKET"))
+		}
+	}
+
 	engine := resolveScorer()
 
 	queueURL := mustEnv("QUEUE_URL")
 	topicARN := mustEnv("SNS_TOPIC_ARN")
 
 	log.Printf("worker started — queue=%s topic=%s", queueURL, topicARN)
-	runLoop(ctx, sqsClient, snsClient, dynamoClient, engine, queueURL, topicARN)
+	runLoop(ctx, sqsClient, snsClient, dynamoClient, s3Client, engine, queueURL, topicARN)
 }
 
 // resolveScorer loads the ML engine when runtime_spec.json is available,
@@ -126,6 +145,7 @@ func runLoop(
 	sqsClient *sqs.Client,
 	snsClient *sns.Client,
 	dynamoClient *dynamo.Client,
+	s3Client *store.S3Client,
 	engine scorer,
 	queueURL, topicARN string,
 ) {
@@ -142,7 +162,7 @@ func runLoop(
 		}
 
 		for _, msg := range out.Messages {
-			if err := processMessage(ctx, msg, sqsClient, snsClient, dynamoClient, engine, queueURL, topicARN); err != nil {
+			if err := processMessage(ctx, msg, sqsClient, snsClient, dynamoClient, s3Client, engine, queueURL, topicARN); err != nil {
 				log.Printf("processing error receipt=%s: %v", aws.ToString(msg.ReceiptHandle), err)
 				// Do not delete — visibility timeout expires and the message retries.
 				// After maxReceiveCount it lands in the DLQ.
@@ -157,6 +177,7 @@ func processMessage(
 	sqsClient *sqs.Client,
 	snsClient *sns.Client,
 	dynamoClient *dynamo.Client,
+	s3Client *store.S3Client,
 	engine scorer,
 	queueURL, topicARN string,
 ) error {
@@ -187,12 +208,25 @@ func processMessage(
 		log.Printf("dynamo UpdateProfile user=%s: %v", tx.UserID, err)
 	}
 
-	payload, _ := json.Marshal(ScoringResult{
+	result := ScoringResult{
 		TransactionID: tx.TransactionID,
 		UserID:        tx.UserID,
 		FraudScore:    fraudScore,
 		IsFraud:       isFraud,
-	})
+	}
+
+	if s3Client != nil {
+		audit := AuditEvent{
+			Transaction:   tx,
+			ScoringResult: result,
+			ProcessedAt:   time.Now().UTC().Format(time.RFC3339),
+		}
+		if err := s3Client.PutRawEvent(ctx, tx.TransactionID, audit); err != nil {
+			log.Printf("s3 audit error tx=%s: %v", tx.TransactionID, err)
+		}
+	}
+
+	payload, _ := json.Marshal(result)
 
 	if _, err := snsClient.Publish(ctx, &sns.PublishInput{
 		TopicArn: aws.String(topicARN),

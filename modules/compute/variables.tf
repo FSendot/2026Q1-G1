@@ -130,6 +130,11 @@ variable "sns_topic_arn" {
   type        = string
 }
 
+variable "audit_bucket_name" {
+  description = "Nombre del bucket S3 donde el contenedor escribe el audit log de cada transacción procesada; pasado como variable de entorno S3_AUDIT_BUCKET."
+  type        = string
+}
+
 variable "log_retention_days" {
   description = "Cantidad de días que se retienen los logs del contenedor en CloudWatch Logs."
   type        = number

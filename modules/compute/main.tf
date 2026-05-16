@@ -30,6 +30,7 @@ locals {
         { name = "QUEUE_NAME", value = var.queue_name },
         { name = "DYNAMODB_TABLE_NAME", value = var.table_name },
         { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
+        { name = "S3_AUDIT_BUCKET", value = var.audit_bucket_name },
       ]
 
       logConfiguration = {
@@ -104,6 +105,36 @@ resource "aws_vpc_security_group_egress_rule" "task_to_endpoints" {
   ip_protocol                  = "tcp"
   from_port                    = 443
   to_port                      = 443
+
+  tags = local.module_tags
+}
+
+data "aws_prefix_list" "s3" {
+  name = format("com.amazonaws.%s.s3", data.aws_region.current.name)
+}
+
+data "aws_prefix_list" "dynamodb" {
+  name = format("com.amazonaws.%s.dynamodb", data.aws_region.current.name)
+}
+
+resource "aws_vpc_security_group_egress_rule" "task_to_s3" {
+  security_group_id = aws_security_group.task.id
+  description       = "HTTPS hacia S3 via Gateway VPC Endpoint (audit log)"
+  prefix_list_id    = data.aws_prefix_list.s3.id
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+
+  tags = local.module_tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "task_to_dynamodb" {
+  security_group_id = aws_security_group.task.id
+  description       = "HTTPS hacia DynamoDB via Gateway VPC Endpoint (user profiles)"
+  prefix_list_id    = data.aws_prefix_list.dynamodb.id
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
 
   tags = local.module_tags
 }

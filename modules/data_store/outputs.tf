@@ -62,3 +62,8 @@ output "proxy_security_group_id" {
   description = "ID del Security Group del RDS Proxy; expuesto para que la composición raíz agregue las reglas de ingress/egress desde las Lambdas."
   value       = aws_security_group.proxy.id
 }
+
+output "audit_bucket_name" {
+  description = "Nombre del bucket S3 donde el scoring engine escribe el audit log de cada transacción procesada."
+  value       = aws_s3_bucket.audit.id
+}

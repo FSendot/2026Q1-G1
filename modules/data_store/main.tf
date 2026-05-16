@@ -1,10 +1,13 @@
+data "aws_caller_identity" "current" {}
+
 locals {
   module_tags = merge(var.tags, {
     Component = "data-store"
   })
 
-  table_name    = format("%s-user-behavior", var.project)
-  db_identifier = format("%s-results-db", var.project)
+  table_name          = format("%s-user-behavior", var.project)
+  db_identifier       = format("%s-results-db", var.project)
+  audit_bucket_name   = format("%s-audit-%s", var.project, data.aws_caller_identity.current.account_id)
 }
 
 resource "aws_dynamodb_table" "user_behavior" {
@@ -31,6 +34,66 @@ resource "aws_dynamodb_table" "user_behavior" {
   tags = merge(local.module_tags, {
     Name = local.table_name
   })
+}
+
+resource "aws_s3_bucket" "audit" {
+  # checkov:skip=CKV_AWS_18: Access logging requeriría un bucket separado; fuera del alcance del lab.
+  # checkov:skip=CKV_AWS_144: Replicación cross-region fuera del alcance del lab académico.
+  # checkov:skip=CKV2_AWS_62: Notificaciones de eventos no requeridas en lab.
+  bucket        = local.audit_bucket_name
+  force_delete  = true
+
+  tags = merge(local.module_tags, {
+    Name = local.audit_bucket_name
+    Role = "audit"
+  })
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "audit" {
+  bucket = aws_s3_bucket.audit.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      # checkov:skip=CKV2_AWS_67: AWS Academy no permite KMS CMK; AES256 cumple el requisito de cifrado at-rest.
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_versioning" "audit" {
+  bucket = aws_s3_bucket.audit.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "audit" {
+  bucket = aws_s3_bucket.audit.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "audit" {
+  bucket = aws_s3_bucket.audit.id
+
+  rule {
+    id     = "expire-old-events"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 90
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
 }
 
 resource "aws_db_subnet_group" "results" {
