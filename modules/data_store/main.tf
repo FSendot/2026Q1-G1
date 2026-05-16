@@ -40,8 +40,8 @@ resource "aws_s3_bucket" "audit" {
   # checkov:skip=CKV_AWS_18: Access logging requeriría un bucket separado; fuera del alcance del lab.
   # checkov:skip=CKV_AWS_144: Replicación cross-region fuera del alcance del lab académico.
   # checkov:skip=CKV2_AWS_62: Notificaciones de eventos no requeridas en lab.
-  bucket       = local.audit_bucket_name
-  force_delete = true
+  bucket        = local.audit_bucket_name
+  force_destroy = true
 
   tags = merge(local.module_tags, {
     Name = local.audit_bucket_name
