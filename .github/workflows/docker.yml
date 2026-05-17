@@ -81,6 +81,10 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Build Lambda layers
+        if: github.ref == 'refs/heads/main'
+        run: make build-layers
+
       - name: Initialize Terraform
         if: github.ref == 'refs/heads/main'
         run: make init
@@ -88,10 +92,9 @@ jobs:
       - name: Bootstrap ECR repository
         if: github.ref == 'refs/heads/main'
         run: |
-          if terraform output -raw ecr_repository_url >/tmp/ecr_repository_url 2>/dev/null; then
-            if [ -s /tmp/ecr_repository_url ]; then
-              exit 0
-            fi
+          terraform output -raw ecr_repository_url >/tmp/ecr_repository_url 2>/dev/null || true
+          if grep -Eq '^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+' /tmp/ecr_repository_url; then
+            exit 0
           fi
 
           echo "No ECR repository output found yet; applying Terraform once with the placeholder image to create repository resources."
@@ -102,9 +105,12 @@ jobs:
         if: github.ref == 'refs/heads/main'
         id: ecr
         run: |
-          ecr_url="$(terraform output -raw ecr_repository_url 2>/dev/null)"
+          terraform output -raw ecr_repository_url >/tmp/ecr_repository_url 2>/dev/null || true
+          ecr_url="$(grep -E '^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+' /tmp/ecr_repository_url | tail -n 1)"
           if [ -z "$ecr_url" ]; then
             echo "Terraform output ecr_repository_url is empty after bootstrap apply." >&2
+            echo "Raw terraform output was:" >&2
+            cat /tmp/ecr_repository_url >&2
             exit 1
           fi
 
