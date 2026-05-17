@@ -28,8 +28,8 @@ Hard constraints driving the design:
 | RDS PostgreSQL `fraud_results` DB      | `modules/data_store` | custom    | PostgreSQL 16.3, `db.t3.micro`, private subnets, encrypted. Output of scoring. Single-AZ lab configuration.    |
 | SNS results topic                      | `modules/notification` | custom  | Fan-out hub: `<project>-results`. Delivers to SQS (buffered) and optionally to email (direct, `is_fraud=true` filter). |
 | SQS results queue + DLQ                | `modules/results_writer` | custom | Buffer between SNS and the writer Lambda. `maxReceiveCount = 3`, visibility timeout 180 s.                   |
-| Lambda results-writer                  | `modules/results_writer` | custom | Python 3.12, in VPC, triggered by SQS. Placeholder; connect to RDS with a psycopg2 layer.                   |
-| HTTP API Gateway + Lambda              | `modules/api`        | custom    | `GET /transactions`. Lambda in VPC to reach RDS. CORS enabled. Placeholder; connect to RDS.                    |
+| Lambda results-writer                  | `modules/results_writer` | custom | Python 3.12, in VPC, triggered by SQS. Connects to RDS with a psycopg2 layer.                   |
+| HTTP API Gateway + Lambda              | `modules/api`        | custom    | `GET /transactions`, `GET /stats`, `GET /health`. Lambda in VPC to reach RDS. The dashboard API is request-driven read traffic, so it stays serverless instead of an always-running Fargate service. |
 | ECR repo                               | `modules/compute`  | custom    | `MUTABLE` tags, scan-on-push.                                                                                   |
 | ECS Cluster (Container Insights on)    | `modules/compute`  | custom    | Single cluster.                                                                                                 |
 | Fargate task definition                | `modules/compute`  | custom    | LabRole as both task and execution role (lab constraint).                                                       |
@@ -67,7 +67,7 @@ From the on-prem side, the SQS hostname `sqs.<region>.amazonaws.com` resolves pr
 - **`LabRole` as both task and execution role** — AWS Academy disallows creating new roles. Documented `CKV_AWS_249` skip on `aws_ecs_task_definition`.
 - **On-prem simulation is BGP-only and single-AZ.** `modules/onprem_sim` is intentionally minimal (one public subnet, permissive SG, one EC2 router). It can be disabled with `var.enable_onprem_sim = false` to skip both the VPN connection costs and the strongSwan stack rollout.
 - **No VPC Flow Logs** — intentionally skipped for the lab footprint. Re-enable later when the Checkov `CKV2_AWS_11` finding becomes a hard requirement.
-- **Application image** is built in GitHub Actions, tagged with the commit SHA, pushed to ECR on `main`, and passed back into Terraform as `image_uri`. The ECR repo uses mutable tags so the CI `latest` tag can move with the SHA tag.
+- **Container image ownership.** The processor image is built in GitHub Actions, tagged with the commit SHA, pushed to ECR on `main`, and passed back into Terraform as `image_uri`; it is owned by the Fargate service in `modules/compute`. The API Dockerfile is built for CI/local validation only and is not pushed to ECR because the dashboard API runs as Lambda. The dashboard Dockerfile builds a static export instead of an ECR image; CI syncs that export to the S3 website bucket created by Terraform.
 - **Local Terraform backend.** Remote S3+DynamoDB backend is documented as a stub in `backend.tf`.
 
 ## 6. How the academic minima are met

@@ -15,6 +15,6 @@ variable "tags" {
 }
 
 variable "api_endpoint" {
-  description = "URL base del HTTP API Gateway; se inyecta en config.js del dashboard."
+  description = "URL base del HTTP API Gateway; se usa para crear el config.js inicial del dashboard."
   type        = string
 }

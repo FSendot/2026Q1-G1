@@ -58,21 +58,29 @@ resource "aws_s3_bucket_policy" "dashboard" {
 resource "aws_s3_object" "index_html" {
   bucket       = aws_s3_bucket.dashboard.id
   key          = "index.html"
-  source       = "${path.module}/index.html"
-  source_hash  = filemd5("${path.module}/index.html")
+  source       = "${path.root}/app/dashboard/index.html"
+  source_hash  = filemd5("${path.root}/app/dashboard/index.html")
   content_type = "text/html"
 
   tags = local.module_tags
+
+  lifecycle {
+    ignore_changes = [source, source_hash]
+  }
 }
 
 resource "aws_s3_object" "app_js" {
   bucket       = aws_s3_bucket.dashboard.id
   key          = "app.js"
-  source       = "${path.module}/app.js"
-  source_hash  = filemd5("${path.module}/app.js")
+  source       = "${path.root}/app/dashboard/app.js"
+  source_hash  = filemd5("${path.root}/app/dashboard/app.js")
   content_type = "application/javascript"
 
   tags = local.module_tags
+
+  lifecycle {
+    ignore_changes = [source, source_hash]
+  }
 }
 
 resource "aws_s3_object" "config_js" {
@@ -82,4 +90,8 @@ resource "aws_s3_object" "config_js" {
   content_type = "application/javascript"
 
   tags = local.module_tags
+
+  lifecycle {
+    ignore_changes = [content]
+  }
 }

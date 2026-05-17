@@ -10,7 +10,7 @@ The day-to-day flow for changing infrastructure.
 
 ## Init
 
-Run after cloning, after any `versions.tf` change, or after pulling backend changes:
+Run after cloning, after any `versions.tf` change, or after pulling backend changes. Use the Make target, not raw `terraform init`, because the backend bucket is derived from the active AWS account ID and passed through `-backend-config`.
 
 ```bash
 make init
@@ -59,5 +59,6 @@ If someone changes infrastructure outside of Terraform:
 ## Common pitfalls
 
 - Forgetting to run `terraform init` after editing `versions.tf` or provider blocks.
+- Running raw `terraform init` and entering an arbitrary S3 bucket. The backend bucket must be `itba-tp-fraud-tfstate-<account-id>` and is created/configured by `make init`.
 - Applying a stale plan after someone else merged a change.
 - Running `terraform apply` from the wrong working directory.

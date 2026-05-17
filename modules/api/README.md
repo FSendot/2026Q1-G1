@@ -1,13 +1,13 @@
 # `modules/api`
 
-Provisions the dashboard API: a Lambda function running inside the VPC (to reach the private RDS instance) exposed via an HTTP API Gateway. The single route `GET /transactions` returns fraud-scoring results stored in PostgreSQL.
+Provisions the dashboard API: a Lambda function running inside the VPC (to reach the private RDS instance) exposed via an HTTP API Gateway. The routes `GET /transactions`, `GET /stats`, and `GET /health` return fraud-scoring results stored in PostgreSQL.
 
 ## Resources
 
 - `aws_cloudwatch_log_group.api_lambda` — `/aws/lambda/<project>-api`. 30-day retention by default.
 - `aws_cloudwatch_log_group.api_gw` — `/aws/apigateway/<project>-api`. 30-day retention by default.
 - `aws_security_group.api_lambda` — `<project>-api-lambda-sg`. No ingress; egress to the VPC endpoint SG on tcp/443 (Logs). The egress rule to RDS (tcp/5432) is created in the root composition to avoid circular module dependencies.
-- `aws_lambda_function.api` — `<project>-api`. Python 3.12, 128 MiB, 15 s timeout, deployed in VPC private subnets. Receives `DB_*` env vars for future RDS queries. Placeholder handler returns an empty `transactions` array; connect to RDS by adding a psycopg2 Lambda layer.
+- `aws_lambda_function.api` — `<project>-api`. Python 3.12, 256 MiB, 15 s timeout, deployed in VPC private subnets. Receives `DB_*` env vars and uses the psycopg2 Lambda layer to query RDS.
 - `aws_apigatewayv2_api.main` — `<project>-api`. HTTP API (not REST API — simpler, cheaper). CORS configured for `GET` and `OPTIONS` from any origin.
 - `aws_apigatewayv2_stage.default` — `$default` stage with `auto_deploy = true`.
 - `aws_apigatewayv2_integration.lambda` — `AWS_PROXY` integration, payload format version `2.0`.
@@ -68,13 +68,9 @@ The dashboard endpoint after apply:
 GET <api_endpoint>/transactions
 ```
 
-## Connecting the Lambda to RDS
+## Lambda instead of Fargate
 
-The placeholder handler (`handler.py`) returns an empty `transactions` array. To complete the integration:
-
-1. Create a Lambda layer with `psycopg2-binary` for Python 3.12.
-2. Attach the layer to `aws_lambda_function.api`.
-3. Implement `SELECT` queries in `handler.py` using the `DB_*` env vars already injected.
+The dashboard API is intentionally Lambda-based. It serves low-volume, request-driven dashboard reads from RDS and does not consume queues or maintain background workers. Keeping it as Lambda avoids an always-running Fargate service and a load balancer, which fits the AWS Academy cost and simplicity constraints. `app/api/Dockerfile` is still built in CI as a packaging/runtime check, but the image is not pushed to ECR because every ECR image in this repo should have a Fargate owner.
 
 ## Notes for AWS Academy
 

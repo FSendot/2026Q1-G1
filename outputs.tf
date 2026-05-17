@@ -109,6 +109,11 @@ output "dashboard_url" {
   value       = module.dashboard.website_url
 }
 
+output "dashboard_bucket_name" {
+  description = "Nombre del bucket S3 donde CI publica los archivos estáticos del dashboard."
+  value       = module.dashboard.bucket_name
+}
+
 output "writer_lambda_name" {
   description = "Nombre de la Lambda que escribe resultados en RDS."
   value       = module.results_writer.lambda_function_name

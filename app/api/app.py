@@ -16,13 +16,13 @@ try:
 except ImportError:
     _HAVE_PSYCOPG2 = False
 
-# ---------- RDS: editá aquí (sin .env). Si DB_HOST queda vacío, se usa el mock. ----------
-DB_HOST = ""
-DB_PORT = 5432
-DB_NAME = ""
-DB_USER = ""
-DB_PASSWORD = ""
-DB_SSLMODE = "require"
+# ---------- RDS: si DB_HOST queda vacío, se usa el mock. ----------
+DB_HOST = os.environ.get("DB_HOST", "")
+DB_PORT = int(os.environ.get("DB_PORT", "5432"))
+DB_NAME = os.environ.get("DB_NAME", "")
+DB_USER = os.environ.get("DB_USER", "")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
+DB_SSLMODE = os.environ.get("DB_SSLMODE", "require")
 
 # Datos de ejemplo si RDS no está configurado
 _MOCK_STATS = {
@@ -74,9 +74,13 @@ _CORS_HEADERS = [
 _SQL_STATS = """
 SELECT
   COUNT(*)::bigint AS total_transactions,
-  COUNT(*) FILTER (WHERE LOWER(TRIM(decision)) = 'allowed')::bigint AS allowed,
+  COUNT(*) FILTER (
+    WHERE is_fraud = FALSE OR LOWER(TRIM(decision)) IN ('allow', 'allowed')
+  )::bigint AS allowed,
   COUNT(*) FILTER (WHERE LOWER(TRIM(decision)) = 'challenge')::bigint AS challenge,
-  COUNT(*) FILTER (WHERE LOWER(TRIM(decision)) = 'blocked')::bigint AS blocked
+  COUNT(*) FILTER (
+    WHERE is_fraud = TRUE OR LOWER(TRIM(decision)) IN ('block', 'blocked')
+  )::bigint AS blocked
 FROM transactions;
 """
 
@@ -84,27 +88,18 @@ _SQL_TRANSACTIONS = """
 SELECT
   transaction_id,
   user_id,
-  person_id,
-  account_id,
   amount,
   currency,
-  "timestamp",
-  channel,
-  destination_account,
   country,
-  score,
-  decision,
-  flag_amount,
-  flag_country,
-  flag_velocity,
-  flag_destination,
-  profile_avg_amount,
-  profile_std_dev,
-  profile_typical_countries,
-  profile_tx_last_10min,
-  model_version,
-  calibrated_score,
-  processor_version,
+  CASE
+    WHEN fraud_score IS NULL THEN NULL
+    ELSE ROUND((fraud_score * 100)::numeric, 0)
+  END AS score,
+  CASE
+    WHEN LOWER(TRIM(decision)) = 'allow' THEN 'allowed'
+    WHEN LOWER(TRIM(decision)) = 'block' THEN 'blocked'
+    ELSE decision
+  END AS decision,
   processed_at
 FROM transactions
 ORDER BY processed_at DESC NULLS LAST, transaction_id DESC
@@ -205,7 +200,7 @@ def application(environ, start_response):
     if path in ("/", "/health"):
         return _json_response(start_response, "200 OK", {"status": "ok"})
 
-    if path == "/api/stats":
+    if path in ("/stats", "/api/stats"):
         if _db_env_configured():
             if not _HAVE_PSYCOPG2:
                 return _json_response(
@@ -227,7 +222,7 @@ def application(environ, start_response):
             return _json_response(start_response, "200 OK", stats)
         return _json_response(start_response, "200 OK", _MOCK_STATS)
 
-    if path == "/api/transactions":
+    if path in ("/transactions", "/api/transactions"):
         qs = parse_qs(query)
         raw_limit = (qs.get("limit") or ["20"])[0]
         try:
@@ -260,7 +255,7 @@ def application(environ, start_response):
             {"items": _MOCK_TRANSACTIONS[:limit]},
         )
 
-    if path == "/api/version":
+    if path in ("/version", "/api/version"):
         return _json_response(
             start_response,
             "200 OK",

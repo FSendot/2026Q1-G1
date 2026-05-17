@@ -6,13 +6,29 @@ on:
       - main
     paths:
       - "app/processor/**"
+      - "app/api/**"
+      - "app/dashboard/**"
       - "app/net/serving/go/**"
+      - "modules/api/**"
+      - "modules/dashboard/**"
+      - ".github/workflows/docker.yml"
+      - "main.tf"
+      - "variables.tf"
+      - "outputs.tf"
   push:
     branches:
       - main
     paths:
       - "app/processor/**"
+      - "app/api/**"
+      - "app/dashboard/**"
       - "app/net/serving/go/**"
+      - "modules/api/**"
+      - "modules/dashboard/**"
+      - ".github/workflows/docker.yml"
+      - "main.tf"
+      - "variables.tf"
+      - "outputs.tf"
   workflow_dispatch:
 
 permissions:
@@ -34,8 +50,20 @@ jobs:
       - name: Prepare runtime spec
         run: make prepare-model
 
-      - name: Build image
+      - name: Build processor image
         run: docker build -f app/processor/Dockerfile -t "fraud-worker:${GITHUB_SHA}" app
+
+      - name: Build API image
+        run: docker build -f app/api/Dockerfile -t "fraud-api:${GITHUB_SHA}" app
+
+      - name: Build dashboard static export
+        if: github.ref != 'refs/heads/main'
+        run: |
+          docker build \
+            -f app/dashboard/Dockerfile \
+            --target export \
+            --output type=local,dest=dashboard-dist \
+            app
 
       - name: Set up Terraform
         if: github.ref == 'refs/heads/main'
@@ -59,6 +87,14 @@ jobs:
         id: ecr
         run: echo "url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
 
+      - name: Tag processor image for ECR
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:processor-${GITHUB_SHA}"
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:processor-latest"
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:latest"
+
       - name: Log in to ECR
         if: github.ref == 'refs/heads/main'
         run: |
@@ -66,22 +102,42 @@ jobs:
           registry="${registry%%/*}"
           aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
 
-      - name: Tag image for ECR
+      - name: Push processor image
         if: github.ref == 'refs/heads/main'
         run: |
-          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
-          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:latest"
-
-      - name: Push image
-        if: github.ref == 'refs/heads/main'
-        run: |
+          docker push "${{ steps.ecr.outputs.url }}:processor-${GITHUB_SHA}"
+          docker push "${{ steps.ecr.outputs.url }}:processor-latest"
           docker push "${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
           docker push "${{ steps.ecr.outputs.url }}:latest"
 
       - name: Terraform plan
         if: github.ref == 'refs/heads/main'
-        run: terraform plan -out=tfplan -var "image_uri=${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
+        run: |
+          terraform plan \
+            -out=tfplan \
+            -var "image_uri=${{ steps.ecr.outputs.url }}:processor-${GITHUB_SHA}"
 
       - name: Terraform apply
         if: github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve tfplan
+
+      - name: Read dashboard deployment outputs
+        if: github.ref == 'refs/heads/main'
+        id: dashboard
+        run: |
+          echo "bucket=$(terraform output -raw dashboard_bucket_name)" >> "$GITHUB_OUTPUT"
+          echo "api_endpoint=$(terraform output -raw api_endpoint)" >> "$GITHUB_OUTPUT"
+
+      - name: Build dashboard for S3
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker build \
+            -f app/dashboard/Dockerfile \
+            --target export \
+            --build-arg "API_BASE=${{ steps.dashboard.outputs.api_endpoint }}" \
+            --output type=local,dest=dashboard-dist \
+            app
+
+      - name: Deploy dashboard to S3
+        if: github.ref == 'refs/heads/main'
+        run: aws s3 sync dashboard-dist "s3://${{ steps.dashboard.outputs.bucket }}/" --delete

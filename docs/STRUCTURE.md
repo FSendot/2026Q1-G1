@@ -38,6 +38,11 @@
 │       ├── outputs.tf
 │       ├── versions.tf
 │       └── README.md
+├── app/
+│   ├── processor/        # Fraud worker container deployed to ECS Fargate
+│   ├── api/              # Dashboard API source + Docker build check; Terraform deploys Lambda zip
+│   ├── dashboard/        # Static frontend export deployed to the dashboard S3 bucket
+│   └── net/              # Local ML pipeline; not deployed, except serving/go used by processor builds
 └── scripts/
 ```
 
@@ -48,6 +53,7 @@
 - Every module has its own `README.md` documenting inputs, outputs, and example usage.
 - Every module has a `versions.tf` pinning Terraform and provider versions.
 - Keep root resource declarations to a minimum: prefer composing modules over inlining resources.
+- `app/` holds the small lab services and Dockerfiles. Keep `app/net` out of cloud deployment; only `app/net/serving/go` is part of the processor build context. Only Docker images consumed by Fargate are pushed to ECR.
 - `scripts/` holds helper shell scripts, bootstrap files, or templates referenced from Terraform. Treat them as code: review them, keep them small.
 
 ## Adding a new module
@@ -59,6 +65,6 @@
 
 ## What does *not* go in this repo
 
-- Application source code.
+- Application source code unrelated to the lab deployment contract.
 - Long-lived secrets (use AWS Secrets Manager or Parameter Store).
 - Personal tooling (keep that in your dotfiles).
