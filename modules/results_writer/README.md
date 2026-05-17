@@ -12,8 +12,8 @@ The SNS → SQS → Lambda pattern adds a buffer and automatic retries. If the L
 - `aws_sqs_queue_policy.results` — allows SNS to `SendMessage` (conditioned on `aws:SourceArn = <topic-arn>`), allows LabRole to consume, denies plain HTTP.
 - `aws_sns_topic_subscription.results_sqs` — subscribes the SQS queue to the SNS topic.
 - `aws_cloudwatch_log_group.writer` — `/aws/lambda/<project>-results-writer`. 30-day retention by default.
-- `aws_security_group.writer_lambda` — `<project>-writer-lambda-sg`. No ingress; egress to the VPC endpoint SG on tcp/443. The egress rule to RDS (tcp/5432) is created in the root composition to avoid circular module dependencies.
-- `aws_lambda_function.writer` — `<project>-results-writer`. Python 3.12, 128 MiB, 30 s timeout, deployed in VPC private subnets. Receives `DB_*` env vars for future RDS connection. Placeholder handler logs the fraud payload; connect to RDS by adding a psycopg2 Lambda layer.
+- `aws_security_group.writer_lambda` — `<project>-writer-lambda-sg`. No ingress; egress to the VPC endpoint SG on tcp/443. The egress rule to RDS Proxy (tcp/5432) is created in the root composition to avoid circular module dependencies.
+- `aws_lambda_function.writer` — `<project>-results-writer`. Python 3.12, 128 MiB, 30 s timeout, deployed in VPC private subnets. Receives `DB_*` env vars and connects to RDS via RDS Proxy using a psycopg2 Lambda layer.
 - `aws_lambda_event_source_mapping.sqs_results` — triggers the Lambda from the results SQS queue. Batch size 10, batching window 30 s.
 
 ## Inputs
@@ -44,7 +44,7 @@ The SNS → SQS → Lambda pattern adds a buffer and automatic retries. If the L
 | `dlq_arn`                 | ARN of the DLQ.                                                                                                    |
 | `lambda_function_name`    | Name of the results-writer Lambda.                                                                                 |
 | `lambda_function_arn`     | ARN of the results-writer Lambda.                                                                                  |
-| `lambda_security_group_id`| Lambda SG ID. Exposed so the root composition can add the egress rule to RDS without circular module dependencies. |
+| `lambda_security_group_id`| Lambda SG ID. Exposed so the root composition can add the egress rule to RDS Proxy without circular module dependencies. |
 | `log_group_name`          | CloudWatch log group name.                                                                                         |
 
 ## Example
@@ -59,7 +59,7 @@ module "results_writer" {
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   sns_topic_arn              = module.notification.topic_arn
-  db_host                    = module.data_store.db_address
+  db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port
   db_name                    = module.data_store.db_name
   db_username                = module.data_store.db_username
@@ -67,15 +67,6 @@ module "results_writer" {
   tags                       = local.common_tags
 }
 ```
-
-## Connecting the Lambda to RDS
-
-The placeholder handler (`handler.py`) logs the fraud payload but does not write to RDS. To complete the integration:
-
-1. Create a Lambda layer with `psycopg2-binary` for Python 3.12.
-2. Attach the layer to `aws_lambda_function.writer`.
-3. Implement the DB write in `handler.py` using the `DB_*` env vars already injected.
-4. Create the `fraud_results` table schema in RDS before the first invocation.
 
 ## Notes for AWS Academy
 

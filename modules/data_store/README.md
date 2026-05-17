@@ -38,6 +38,7 @@ Provisions all persistent storage for the fraud-scoring system: a DynamoDB table
 | `db_name`                       | `string`       | `"fraud_results"` | Initial database name in PostgreSQL.                                              |
 | `db_username`                   | `string`       | `"fraud_admin"`   | Master username for the RDS instance.                                             |
 | `db_password`                   | `string`       | n/a               | Master password. `sensitive = true`. Generate with `random_password` in the root. |
+| `principal_arn`                 | `string`       | n/a               | LabRole ARN used by RDS Proxy to read the Secrets Manager secret.                 |
 
 ## Outputs
 
@@ -59,8 +60,10 @@ Provisions all persistent storage for the fraud-scoring system: a DynamoDB table
 | `db_name`               | Initial database name.                                                                                                |
 | `db_username`           | Master username.                                                                                                      |
 | `db_endpoint`           | Full endpoint in `host:port` format.                                                                                  |
-| `rds_security_group_id` | RDS security group ID. Exposed so the root composition can add Lambda ingress rules without circular module dependencies. |
-| `db_instance_id`        | RDS instance identifier.                                                                                              |
+| `rds_security_group_id`     | RDS security group ID. Exposed so the root composition can add rules without circular module dependencies.          |
+| `db_instance_id`            | RDS instance identifier.                                                                                             |
+| `proxy_endpoint`            | Hostname of the RDS Proxy. Use as `DB_HOST` in Lambdas instead of the direct RDS endpoint.                          |
+| `proxy_security_group_id`   | RDS Proxy security group ID. Exposed so the root composition can add Lambda ingress rules to the proxy.              |
 
 ## Example
 
@@ -69,6 +72,7 @@ module "data_store" {
   source = "./modules/data_store"
 
   project            = local.project
+  principal_arn      = data.aws_iam_role.lab.arn
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
   db_password        = random_password.db.result
@@ -76,11 +80,11 @@ module "data_store" {
 }
 ```
 
-Cross-module security group rules (Lambda → RDS) must be created in the root to avoid circular dependencies between `modules/data_store`, `modules/results_writer`, and `modules/api`:
+Lambdas connect to RDS **via RDS Proxy** — the `proxy_endpoint` output is passed as `db_host`. Cross-module security group rules (Lambda → Proxy) must be created in the root to avoid circular dependencies:
 
 ```hcl
-resource "aws_vpc_security_group_ingress_rule" "rds_from_writer" {
-  security_group_id            = module.data_store.rds_security_group_id
+resource "aws_vpc_security_group_ingress_rule" "proxy_from_writer" {
+  security_group_id            = module.data_store.proxy_security_group_id
   referenced_security_group_id = module.results_writer.lambda_security_group_id
   ip_protocol                  = "tcp"
   from_port                    = 5432

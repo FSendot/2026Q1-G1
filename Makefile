@@ -73,6 +73,10 @@ apply:
 
 destroy:
 	terraform destroy
+	@aws lambda list-event-source-mappings --region us-east-1 \
+	  --query 'EventSourceMappings[?contains(FunctionArn, `itba-tp-fraud`)].UUID' \
+	  --output text 2>/dev/null | tr '\t' '\n' | grep -v '^$$' | \
+	  xargs -I{} aws lambda delete-event-source-mapping --uuid {} --region us-east-1 2>/dev/null || true
 
 clean:
 	find . -type d -name ".terraform" -exec rm -rf {} +

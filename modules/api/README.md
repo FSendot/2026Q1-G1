@@ -6,7 +6,7 @@ Provisions the dashboard API: a Lambda function running inside the VPC (to reach
 
 - `aws_cloudwatch_log_group.api_lambda` — `/aws/lambda/<project>-api`. 30-day retention by default.
 - `aws_cloudwatch_log_group.api_gw` — `/aws/apigateway/<project>-api`. 30-day retention by default.
-- `aws_security_group.api_lambda` — `<project>-api-lambda-sg`. No ingress; egress to the VPC endpoint SG on tcp/443 (Logs). The egress rule to RDS (tcp/5432) is created in the root composition to avoid circular module dependencies.
+- `aws_security_group.api_lambda` — `<project>-api-lambda-sg`. No ingress; egress to the VPC endpoint SG on tcp/443 (Logs). The egress rule to RDS Proxy (tcp/5432) is created in the root composition to avoid circular module dependencies.
 - `aws_lambda_function.api` — `<project>-api`. Python 3.12, 256 MiB, 15 s timeout, deployed in VPC private subnets. Receives `DB_*` env vars and uses the psycopg2 Lambda layer to query RDS.
 - `aws_apigatewayv2_api.main` — `<project>-api`. HTTP API (not REST API — simpler, cheaper). CORS configured for `GET` and `OPTIONS` from any origin.
 - `aws_apigatewayv2_stage.default` — `$default` stage with `auto_deploy = true`.
@@ -39,7 +39,7 @@ Provisions the dashboard API: a Lambda function running inside the VPC (to reach
 | `api_id`                  | HTTP API Gateway ID.                                                                                            |
 | `lambda_function_name`    | Name of the API Lambda.                                                                                         |
 | `lambda_function_arn`     | ARN of the API Lambda.                                                                                          |
-| `lambda_security_group_id`| Lambda SG ID. Exposed so the root composition can add the egress rule to RDS without circular module dependencies. |
+| `lambda_security_group_id`| Lambda SG ID. Exposed so the root composition can add the egress rule to RDS Proxy without circular module dependencies. |
 | `log_group_name`          | CloudWatch log group name for the Lambda.                                                                       |
 
 ## Example
@@ -53,7 +53,7 @@ module "api" {
   vpc_id                     = module.network.vpc_id
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
-  db_host                    = module.data_store.db_address
+  db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port
   db_name                    = module.data_store.db_name
   db_username                = module.data_store.db_username
