@@ -50,3 +50,7 @@ id_rsa*
 
 # Lambda deployment packages generados por archive_file (data source de Terraform)
 **/handler.zip
+
+# Lambda layers — artefactos de build generados por make build-layers
+layers/psycopg2/python/
+layers/psycopg2/psycopg2-layer.zip

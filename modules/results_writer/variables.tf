@@ -49,6 +49,11 @@ variable "sns_topic_arn" {
   type        = string
 }
 
+variable "psycopg2_layer_arn" {
+  description = "ARN del Lambda layer con psycopg2 compilado para Amazon Linux 2023 (Python 3.12)."
+  type        = string
+}
+
 variable "db_host" {
   description = "Hostname del endpoint RDS (DB_HOST en la Lambda)."
   type        = string
