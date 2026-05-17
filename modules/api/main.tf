@@ -150,7 +150,36 @@ resource "aws_apigatewayv2_route" "get_health" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
-# Catch-all: permite paths con prefijo /api/ (usado por el dashboard)
+resource "aws_apigatewayv2_route" "get_stats_timeseries" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /stats/timeseries"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_filters" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /filters"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_transaction_by_id" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /transactions/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_users" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /users"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_user_by_id" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /users/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
 resource "aws_apigatewayv2_route" "default" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "$default"

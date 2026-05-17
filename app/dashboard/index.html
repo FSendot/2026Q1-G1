@@ -1,452 +1,437 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fraud Detector</title>
-    <style>
-      :root {
-        --bg: #f4f6f8;
-        --surface: #ffffff;
-        --text: #111827;
-        --text-soft: #6b7280;
-        --border: #e5e7eb;
-        --accent: #2563eb;
-        --accent-soft: #eff6ff;
-        --danger: #dc2626;
-        --radius: 12px;
-        --radius-sm: 8px;
-        --shadow: 0 1px 2px rgba(17, 24, 39, 0.06),
-          0 8px 24px rgba(17, 24, 39, 0.06);
-        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-          sans-serif;
-        color: var(--text);
-        background: var(--bg);
-        line-height: 1.5;
-        -webkit-font-smoothing: antialiased;
-      }
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fraud Detector — Panel</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --text-soft: #6b7280;
+      --accent: #2563eb;
+      --accent-light: #eff6ff;
+      --danger: #dc2626;
+      --danger-light: #fef2f2;
+      --success: #16a34a;
+      --success-light: #f0fdf4;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,.07), 0 6px 20px rgba(0,0,0,.05);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+    }
 
-      * {
-        box-sizing: border-box;
-      }
+    /* ── Login ──────────────────────────────────────────── */
+    #view-login {
+      min-height: 100vh; display: flex; align-items: center;
+      justify-content: center; padding: 1.5rem;
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, #dbeafe 0%, transparent 55%), var(--bg);
+    }
+    .login-card {
+      width: 100%; max-width: 380px; background: var(--surface);
+      border-radius: calc(var(--radius) + 4px); padding: 2rem;
+      box-shadow: var(--shadow); border: 1px solid var(--border);
+    }
+    .login-brand { display: flex; align-items: center; gap: .65rem; margin-bottom: .25rem; }
+    .brand-logo {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      display: grid; place-items: center; color: #fff; font-size: 1.1rem; font-weight: 700; flex-shrink: 0;
+    }
+    .login-card h1 { margin: 0; font-size: 1.2rem; font-weight: 600; letter-spacing: -.02em; }
+    .login-tagline { margin: .3rem 0 1.5rem; font-size: .85rem; color: var(--text-soft); }
+    .field { margin-bottom: .85rem; }
+    .field label { display: block; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-soft); margin-bottom: .3rem; }
+    .field input { width: 100%; padding: .6rem .75rem; font: inherit; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fafbfc; transition: border-color .15s, box-shadow .15s; }
+    .field input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-light); }
+    .btn-primary { cursor: pointer; font: inherit; font-weight: 600; border: none; border-radius: var(--radius-sm); padding: .65rem 1rem; width: 100%; background: var(--accent); color: #fff; transition: filter .15s; }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .login-hint { margin-top: .85rem; font-size: .75rem; color: var(--text-soft); text-align: center; }
+    .login-hint strong { color: var(--text); }
+    #login-error { margin-top: .5rem; font-size: .8rem; color: var(--danger); min-height: 1.2em; }
 
-      body {
-        margin: 0;
-        min-height: 100vh;
-      }
+    /* ── App shell ──────────────────────────────────────── */
+    #view-app { display: flex; flex-direction: column; min-height: 100vh; }
 
-      /* ——— Login ——— */
-      #view-login {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 1.5rem;
-        background: radial-gradient(
-            ellipse 120% 80% at 50% -20%,
-            #dbeafe 0%,
-            transparent 55%
-          ),
-          var(--bg);
-      }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .6rem 1.5rem; background: var(--surface);
+      border-bottom: 1px solid var(--border); gap: 1rem; flex-wrap: wrap;
+    }
+    .topbar-brand { display: flex; align-items: center; gap: .55rem; }
+    .topbar-brand .brand-logo { width: 32px; height: 32px; border-radius: 8px; font-size: .85rem; }
+    .brand-name { font-size: .95rem; font-weight: 600; letter-spacing: -.01em; }
+    .topbar-right { display: flex; align-items: center; gap: .65rem; }
+    .status-indicator { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--text-soft); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex-shrink: 0; }
+    .dot.online  { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
+    .dot.offline { background: var(--danger); box-shadow: 0 0 0 3px rgba(220,38,38,.2); }
+    .dot.loading { background: #f59e0b; animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+    .btn-ghost { cursor: pointer; font: inherit; font-size: .8rem; font-weight: 500; padding: .4rem .75rem; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text); transition: background .15s; }
+    .btn-ghost:hover { background: var(--bg); }
+    .btn-ghost.danger { color: var(--danger); border-color: #fecaca; }
+    .btn-ghost.danger:hover { background: var(--danger-light); }
 
-      .login-card {
-        width: 100%;
-        max-width: 380px;
-        background: var(--surface);
-        border-radius: calc(var(--radius) + 4px);
-        padding: 2rem 2rem 1.75rem;
-        box-shadow: var(--shadow);
-        border: 1px solid rgba(229, 231, 235, 0.9);
-      }
+    /* ── Tabs ───────────────────────────────────────────── */
+    .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 1.5rem; }
+    .tab-btn { cursor: pointer; background: none; border: none; font: inherit; font-size: .85rem; font-weight: 500; padding: .75rem 1rem; color: var(--text-soft); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s, border-color .15s; }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
-      .login-brand {
-        display: flex;
-        align-items: center;
-        gap: 0.65rem;
-        margin-bottom: 0.35rem;
-      }
+    /* ── Global filter bar ──────────────────────────────── */
+    .global-filters {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: .6rem 1.5rem; display: flex; align-items: center;
+      gap: .6rem; flex-wrap: wrap;
+    }
+    .gf-label { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-soft); white-space: nowrap; }
+    .gf-sep { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; margin: 0 .15rem; }
+    .gf-input, .gf-select {
+      padding: .35rem .6rem; font: inherit; font-size: .8rem;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--surface); color: var(--text);
+    }
+    .gf-input { min-width: 140px; }
+    .gf-input:focus, .gf-select:focus { outline: none; border-color: var(--accent); }
+    .gf-actions { display: flex; gap: .35rem; margin-left: auto; }
+    .btn-apply { cursor: pointer; font: inherit; font-size: .8rem; font-weight: 600; padding: .35rem .85rem; border-radius: var(--radius-sm); border: none; background: var(--accent); color: #fff; transition: filter .15s; }
+    .btn-apply:hover { filter: brightness(1.08); }
+    .btn-clear { cursor: pointer; font: inherit; font-size: .8rem; font-weight: 500; padding: .35rem .65rem; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); transition: background .15s; }
+    .btn-clear:hover { background: var(--bg); }
+    .active-filters-badge { display: inline-flex; align-items: center; gap: .3rem; font-size: .72rem; font-weight: 600; padding: .2rem .5rem; border-radius: 999px; background: var(--accent-light); color: var(--accent); }
 
-      .login-logo {
-        width: 40px;
-        height: 40px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #2563eb, #1d4ed8);
-        display: grid;
-        place-items: center;
-        color: #fff;
-        font-size: 1.1rem;
-        font-weight: 700;
-        letter-spacing: -0.02em;
-      }
+    /* ── Content ────────────────────────────────────────── */
+    .content { flex: 1; padding: 1.5rem; max-width: 1100px; width: 100%; margin: 0 auto; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
 
-      .login-card h1 {
-        font-size: 1.25rem;
-        font-weight: 600;
-        margin: 0;
-        letter-spacing: -0.02em;
-      }
+    /* ── Cards ──────────────────────────────────────────── */
+    .card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 1.25rem; margin-bottom: 1rem; }
+    .card-title { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-soft); margin: 0 0 1rem; }
 
-      .login-card .tagline {
-        margin: 0.35rem 0 1.5rem;
-        font-size: 0.875rem;
-        color: var(--text-soft);
-      }
+    /* ── Two-column row ─────────────────────────────────── */
+    .two-col { display: grid; grid-template-columns: 1fr 260px; gap: 1rem; margin-bottom: 1rem; }
+    @media (max-width: 680px) { .two-col { grid-template-columns: 1fr; } }
 
-      .field {
-        margin-bottom: 1rem;
-      }
+    /* ── KPI grid ───────────────────────────────────────── */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .65rem; }
+    .kpi-card { padding: .85rem 1rem; border-radius: var(--radius-sm); background: #fafbfc; border: 1px solid var(--border); }
+    .kpi-card.danger  { background: var(--danger-light);  border-color: #fecaca; }
+    .kpi-card.success { background: var(--success-light); border-color: #bbf7d0; }
+    .kpi-value { font-size: 1.4rem; font-weight: 700; letter-spacing: -.03em; line-height: 1.1; }
+    .kpi-card.danger  .kpi-value { color: var(--danger); }
+    .kpi-card.success .kpi-value { color: var(--success); }
+    .kpi-label { font-size: .7rem; color: var(--text-soft); margin-top: .25rem; }
 
-      .field label {
-        display: block;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-soft);
-        margin-bottom: 0.35rem;
-      }
+    /* ── Pie / donut chart ──────────────────────────────── */
+    .pie-svg { width: 160px; height: 160px; display: block; margin: 0 auto; }
+    .pie-legend { margin-top: .85rem; display: flex; flex-direction: column; gap: .45rem; }
+    .pie-legend-item { display: flex; align-items: center; gap: .5rem; font-size: .78rem; }
+    .pie-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+    .pie-legend-label { flex: 1; color: var(--text-soft); }
+    .pie-legend-count { font-weight: 600; color: var(--text); }
+    .pie-legend-pct { color: var(--text-soft); font-size: .72rem; }
 
-      .field input {
-        width: 100%;
-        padding: 0.65rem 0.75rem;
-        font: inherit;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: #fafbfc;
-        transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-      }
+    /* ── Timeseries chart ───────────────────────────────── */
+    .chart-wrap { min-height: 180px; }
+    .chart-svg { width: 100%; height: auto; display: block; }
+    .chart-legend { display: flex; gap: 1.25rem; margin-top: .65rem; font-size: .75rem; color: var(--text-soft); }
+    .legend-item { display: flex; align-items: center; gap: .35rem; }
+    .legend-swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+    .legend-swatch.total { background: #bfdbfe; }
+    .legend-swatch.fraud { background: #ef4444; }
 
-      .field input:focus {
-        outline: none;
-        border-color: var(--accent);
-        background: var(--surface);
-        box-shadow: 0 0 0 3px var(--accent-soft);
-      }
+    /* ── Tables ─────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; color: var(--text-soft); font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { color: var(--text); }
+    th.sortable:hover .sort-icon { opacity: .6; }
+    .sort-icon { font-size: .72rem; opacity: .3; transition: opacity .15s, color .15s; }
+    th.sort-active .sort-icon { opacity: 1; color: var(--accent); }
+    tbody tr:hover td { background: #fafbfc; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: var(--accent-light); }
+    .mono { font-family: ui-monospace, monospace; font-size: .72rem; color: var(--text-soft); }
+    .empty-row, .loading-row { text-align: center; color: var(--text-soft); padding: 2.5rem !important; font-style: italic; }
 
-      .btn {
-        cursor: pointer;
-        font: inherit;
-        font-weight: 600;
-        font-size: 0.9rem;
-        border: none;
-        border-radius: var(--radius-sm);
-        padding: 0.65rem 1rem;
-        width: 100%;
-        background: var(--accent);
-        color: #fff;
-        transition: filter 0.15s, transform 0.1s;
-      }
+    /* ── Pills ──────────────────────────────────────────── */
+    .pill { display: inline-block; padding: .15rem .5rem; border-radius: 999px; font-size: .68rem; font-weight: 600; }
+    .pill.allow     { background: #dcfce7; color: #15803d; }
+    .pill.block     { background: #fee2e2; color: #b91c1c; }
+    .pill.challenge { background: #fef3c7; color: #92400e; }
 
-      .btn:hover {
-        filter: brightness(1.05);
-      }
+    /* ── Filter bar (per-tab) ───────────────────────────── */
+    .filter-bar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .filter-group { display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+    .filter-group button { cursor: pointer; font: inherit; font-size: .8rem; padding: .4rem .8rem; border: none; background: var(--surface); color: var(--text-soft); transition: background .15s, color .15s; }
+    .filter-group button.active { background: var(--accent); color: #fff; }
+    .filter-group button:not(:last-child) { border-right: 1px solid var(--border); }
+    .search-wrap { display: flex; gap: .35rem; }
+    .search-wrap input { padding: .4rem .65rem; font: inherit; font-size: .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 200px; }
+    .search-wrap input:focus { outline: none; border-color: var(--accent); }
+    .select-wrap select { padding: .4rem .65rem; font: inherit; font-size: .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
 
-      .btn:active {
-        transform: scale(0.99);
-      }
+    /* ── Pagination ─────────────────────────────────────── */
+    .pagination { display: flex; align-items: center; gap: .5rem; margin-top: .85rem; font-size: .8rem; color: var(--text-soft); }
+    .pagination button { cursor: pointer; font: inherit; font-size: .8rem; padding: .35rem .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); transition: background .15s; }
+    .pagination button:disabled { opacity: .4; cursor: default; }
+    .pagination button:not(:disabled):hover { background: var(--bg); }
 
-      #login-error {
-        margin-top: 0.85rem;
-        font-size: 0.8125rem;
-        color: var(--danger);
-        min-height: 1.25rem;
-      }
+    /* ── Tooltip ────────────────────────────────────────── */
+    .tip {
+      position: fixed; z-index: 9999; pointer-events: none;
+      background: #111827; color: #f9fafb;
+      padding: .35rem .65rem; border-radius: 6px;
+      font-size: .78rem; line-height: 1.45; white-space: nowrap;
+      box-shadow: 0 2px 10px rgba(0,0,0,.3);
+    }
+    .tip::after {
+      content: ''; position: absolute; top: 100%; left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent; border-top-color: #111827;
+    }
+    .tip b { font-weight: 600; color: #fff; }
 
-      .login-foot {
-        margin-top: 1.25rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--border);
-        font-size: 0.75rem;
-        color: var(--text-soft);
-        text-align: center;
-      }
+    /* ── Pie segment hover ───────────────────────────────── */
+    .pie-seg { transition: filter .15s; cursor: default; }
+    .pie-seg:hover { filter: brightness(1.18) drop-shadow(0 2px 5px rgba(0,0,0,.25)); }
 
-      /* ——— App ——— */
-      #view-app {
-        display: none;
-        padding: 1.25rem clamp(1rem, 4vw, 2rem) 2rem;
-        max-width: 1040px;
-        margin: 0 auto;
-      }
+    /* ── Bar hover ───────────────────────────────────────── */
+    .bar-rect { transition: opacity .1s; }
+    .bar-rect:hover { opacity: .75; cursor: default; }
 
-      #view-app.is-visible {
-        display: block;
-      }
+    /* ── Errors / empty ─────────────────────────────────── */
+    .tab-error { color: var(--danger); font-size: .82rem; background: var(--danger-light); border-radius: var(--radius-sm); padding: .6rem .85rem; margin-bottom: .75rem; }
+    .error-text { color: var(--danger); font-size: .85rem; }
+    .empty-msg { color: var(--text-soft); font-size: .85rem; text-align: center; padding: 1.5rem 0; margin: 0; }
 
-      .topbar {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-      }
+    /* ── Modal ──────────────────────────────────────────── */
+    dialog { border: none; border-radius: var(--radius); padding: 0; box-shadow: 0 8px 40px rgba(0,0,0,.18); max-width: 800px; width: calc(100% - 2rem); max-height: 90vh; overflow: auto; }
+    dialog::backdrop { background: rgba(0,0,0,.4); }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 1.15rem 1.5rem; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+    .modal-header h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+    .modal-close { cursor: pointer; background: none; border: none; font-size: 1.2rem; color: var(--text-soft); padding: .2rem .4rem; border-radius: 4px; }
+    .modal-close:hover { background: var(--bg); }
+    .modal-body { padding: 1.25rem 1.5rem; }
+    .modal-body h4 { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-soft); margin: 0 0 .65rem; }
+    .user-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .6rem; margin-bottom: 1.25rem; }
+  </style>
+</head>
+<body>
 
-      .topbar-title {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-      }
+<!-- ── Login ─────────────────────────────────────────────────────────────── -->
+<div id="view-login">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-logo">FD</div>
+      <div><h1>Fraud Detector</h1></div>
+    </div>
+    <p class="login-tagline">Panel de operaciones · Demo</p>
+    <form id="login-form" autocomplete="on">
+      <div class="field">
+        <label for="login-user">Usuario</label>
+        <input id="login-user" type="text" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="login-pass">Contraseña</label>
+        <input id="login-pass" type="password" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn-primary">Ingresar</button>
+      <p id="login-error" role="alert"></p>
+    </form>
+    <p class="login-hint">Credenciales demo: <strong>cloud / cloud</strong></p>
+  </div>
+</div>
 
-      .topbar-title .dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #22c55e;
-        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
-      }
+<!-- ── App ───────────────────────────────────────────────────────────────── -->
+<div id="view-app" hidden>
 
-      .topbar-title .dot.offline {
-        background: #f59e0b;
-        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
-      }
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-logo">FD</div>
+      <span class="brand-name">Fraud Detector</span>
+    </div>
+    <div class="topbar-right">
+      <div class="status-indicator">
+        <span class="dot" id="status-dot"></span>
+        <span id="status-text">—</span>
+      </div>
+      <button class="btn-ghost" id="btn-refresh">Actualizar</button>
+      <button class="btn-ghost danger" id="btn-logout">Salir</button>
+    </div>
+  </header>
 
-      .topbar h1 {
-        font-size: clamp(1.15rem, 2.5vw, 1.35rem);
-        font-weight: 600;
-        margin: 0;
-        letter-spacing: -0.03em;
-      }
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn active" data-tab="overview"     role="tab">Resumen</button>
+    <button class="tab-btn"        data-tab="transactions" role="tab">Transacciones</button>
+    <button class="tab-btn"        data-tab="users"        role="tab">Usuarios</button>
+  </nav>
 
-      .topbar p {
-        margin: 0.15rem 0 0;
-        font-size: 0.8125rem;
-        color: var(--text-soft);
-      }
+  <!-- Global filter bar -->
+  <div class="global-filters" id="global-filters">
+    <span class="gf-label">Filtros</span>
+    <div class="gf-sep"></div>
 
-      .topbar-actions {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.5rem;
-      }
+    <input class="gf-input" id="gf-user"    type="text"   placeholder="Usuario…" />
+    <select class="gf-select" id="gf-country">
+      <option value="">País: todos</option>
+    </select>
+    <select class="gf-select" id="gf-channel">
+      <option value="">Canal: todos</option>
+    </select>
+    <input class="gf-input" id="gf-from"   type="date"   title="Desde" style="min-width:0;width:130px" />
+    <input class="gf-input" id="gf-to"     type="date"   title="Hasta" style="min-width:0;width:130px" />
 
-      .btn-ghost {
-        cursor: pointer;
-        font: inherit;
-        font-size: 0.8125rem;
-        font-weight: 500;
-        padding: 0.45rem 0.75rem;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--surface);
-        color: var(--text);
-        transition: background 0.15s, border-color 0.15s;
-      }
+    <div class="gf-actions">
+      <span id="active-badge" hidden class="active-filters-badge">● Filtros activos</span>
+      <button class="btn-clear" id="gf-clear">Limpiar</button>
+      <button class="btn-apply" id="gf-apply">Aplicar</button>
+    </div>
+  </div>
 
-      .btn-ghost:hover {
-        background: #f9fafb;
-        border-color: #d1d5db;
-      }
+  <main class="content">
 
-      .btn-ghost.danger {
-        color: var(--danger);
-        border-color: #fecaca;
-        background: #fff;
-      }
+    <!-- ── Resumen ─────────────────────────────────────── -->
+    <div id="tab-overview" class="tab-pane active" role="tabpanel">
+      <p id="error-overview" class="tab-error" hidden></p>
 
-      .btn-ghost.danger:hover {
-        background: #fef2f2;
-      }
-
-      #status {
-        font-size: 0.8125rem;
-        color: var(--text-soft);
-      }
-
-      .card {
-        background: var(--surface);
-        border-radius: var(--radius);
-        padding: 1.15rem 1.25rem;
-        margin-bottom: 1rem;
-        border: 1px solid rgba(229, 231, 235, 0.85);
-        box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
-      }
-
-      .card h2 {
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-soft);
-        margin: 0 0 1rem;
-      }
-
-      .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 0.75rem;
-      }
-
-      .stat {
-        padding: 0.85rem 1rem;
-        border-radius: var(--radius-sm);
-        background: #fafbfc;
-        border: 1px solid var(--border);
-      }
-
-      .stat .value {
-        font-size: 1.35rem;
-        font-weight: 600;
-        letter-spacing: -0.02em;
-        line-height: 1.2;
-      }
-
-      .stat .label {
-        font-size: 0.75rem;
-        color: var(--text-soft);
-        margin-top: 0.2rem;
-      }
-
-      #error {
-        color: var(--danger);
-        font-size: 0.8125rem;
-        margin-top: 0.5rem;
-      }
-
-      .table-wrap {
-        overflow-x: auto;
-        margin: 0 -0.25rem;
-        padding: 0 0.25rem;
-      }
-
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.8125rem;
-      }
-
-      th,
-      td {
-        text-align: left;
-        padding: 0.55rem 0.5rem;
-        border-bottom: 1px solid var(--border);
-      }
-
-      th {
-        font-weight: 600;
-        color: var(--text-soft);
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-
-      tbody tr:hover td {
-        background: #fafbfc;
-      }
-
-      .pill {
-        display: inline-block;
-        padding: 0.15rem 0.45rem;
-        border-radius: 999px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: capitalize;
-      }
-
-      .pill.allow {
-        background: #ecfdf5;
-        color: #047857;
-      }
-
-      .pill.challenge {
-        background: #fffbeb;
-        color: #b45309;
-      }
-
-      .pill.block {
-        background: #fef2f2;
-        color: #b91c1c;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="view-login" aria-labelledby="login-heading">
-      <div class="login-card">
-        <div class="login-brand">
-          <div class="login-logo" aria-hidden="true">FD</div>
-          <div>
-            <h1 id="login-heading">Fraud Detector</h1>
-          </div>
+      <!-- KPIs + pie chart -->
+      <div class="two-col">
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Métricas globales</p>
+          <div id="kpi-grid" class="kpi-grid"></div>
         </div>
-        <p class="tagline">Ingresá con tu cuenta de demo.</p>
-        <form id="login-form" autocomplete="on">
-          <div class="field">
-            <label for="username">Usuario</label>
-            <input
-              id="username"
-              name="username"
-              type="text"
-              autocomplete="username"
-              required
-            />
-          </div>
-          <div class="field">
-            <label for="password">Contraseña</label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autocomplete="current-password"
-              required
-            />
-          </div>
-          <button type="submit" class="btn">Entrar</button>
-          <div id="login-error" role="alert"></div>
-        </form>
-        <p class="login-foot">Demo estática · API en EC2</p>
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Distribución de decisiones</p>
+          <div id="pie-wrap"><p class="empty-msg">Cargando…</p></div>
+        </div>
+      </div>
+
+      <!-- Timeseries 24h + 7d -->
+      <div class="two-col" style="margin-top:1rem;grid-template-columns:1fr 1fr">
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Actividad — últimas 24 horas</p>
+          <div id="chart-wrap" class="chart-wrap"><p class="empty-msg">Cargando…</p></div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Actividad — últimos 7 días</p>
+          <div id="chart-weekly-wrap" class="chart-wrap"><p class="empty-msg">Cargando…</p></div>
+        </div>
+      </div>
+
+      <!-- Recent fraud -->
+      <div class="card">
+        <p class="card-title">Últimas transacciones fraudulentas</p>
+        <div class="table-wrap">
+          <table id="recent-fraud-table">
+            <thead>
+              <tr><th>ID</th><th>Usuario</th><th>Monto</th><th>País</th><th>Canal</th><th>Score</th><th>Procesada</th></tr>
+            </thead>
+            <tbody><tr><td colspan="7" class="loading-row">Cargando…</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <div id="view-app">
-      <header class="topbar">
-        <div>
-          <div class="topbar-title">
-            <span id="status-dot" class="dot" aria-hidden="true"></span>
-            <div>
-              <h1>Fraud Detector</h1>
-              <p>Panel de operaciones</p>
-            </div>
+    <!-- ── Transacciones ────────────────────────────────── -->
+    <div id="tab-transactions" class="tab-pane" role="tabpanel">
+      <p id="error-transactions" class="tab-error" hidden></p>
+      <div class="card">
+        <div class="filter-bar">
+          <div class="filter-group">
+            <button id="tx-filter-all"   class="active">Todas</button>
+            <button id="tx-filter-fraud">Fraudes</button>
+            <button id="tx-filter-ok">Permitidas</button>
+          </div>
+          <div class="select-wrap">
+            <select id="tx-limit" aria-label="Resultados por página">
+              <option value="20">20 / pág.</option>
+              <option value="50">50 / pág.</option>
+              <option value="100">100 / pág.</option>
+            </select>
           </div>
         </div>
-        <div class="topbar-actions">
-          <span id="status">—</span>
-          <button type="button" class="btn-ghost" id="reload">Actualizar</button>
-          <button type="button" class="btn-ghost danger" id="logout">
-            Salir
-          </button>
-        </div>
-      </header>
-
-      <div class="card">
-        <h2>Resumen</h2>
-        <div id="stats" class="stats-grid"></div>
-        <div id="error" hidden></div>
-      </div>
-
-      <div class="card">
-        <h2>Últimas transacciones</h2>
         <div class="table-wrap">
           <table id="tx-table">
             <thead>
               <tr>
                 <th>ID</th>
                 <th>Usuario</th>
-                <th>Monto</th>
+                <th class="sortable" data-sort="amount">Monto<span class="sort-icon"> ⇅</span></th>
                 <th>País</th>
-                <th>Score</th>
+                <th>Canal</th>
+                <th class="sortable" data-sort="fraud_score">Score<span class="sort-icon"> ⇅</span></th>
                 <th>Decisión</th>
-                <th>Procesado</th>
+                <th class="sortable" data-sort="processed_at">Procesada<span class="sort-icon"> ↓</span></th>
               </tr>
             </thead>
-            <tbody></tbody>
+            <tbody id="tx-tbody"><tr><td colspan="8" class="loading-row">Cargando…</td></tr></tbody>
           </table>
+        </div>
+        <div class="pagination">
+          <button id="tx-prev" disabled>← Anterior</button>
+          <span id="tx-page-info">—</span>
+          <button id="tx-next" disabled>Siguiente →</button>
         </div>
       </div>
     </div>
 
-    <script src="config.js"></script>
-    <script src="app.js"></script>
-  </body>
+    <!-- ── Usuarios ─────────────────────────────────────── -->
+    <div id="tab-users" class="tab-pane" role="tabpanel">
+      <p id="error-users" class="tab-error" hidden></p>
+      <div class="card">
+        <p class="card-title">Usuarios · hacé clic en una fila para ver el detalle</p>
+        <div class="table-wrap">
+          <table id="users-table">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th class="sortable" data-sort="total_transactions">Transacciones<span class="sort-icon"> ⇅</span></th>
+                <th class="sortable" data-sort="fraud_count">Fraudes<span class="sort-icon"> ↓</span></th>
+                <th class="sortable" data-sort="fraud_rate_pct">Tasa<span class="sort-icon"> ⇅</span></th>
+                <th class="sortable" data-sort="avg_fraud_score">Score prom.<span class="sort-icon"> ⇅</span></th>
+                <th class="sortable" data-sort="last_seen">Última actividad<span class="sort-icon"> ⇅</span></th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody"><tr><td colspan="6" class="loading-row">Cargando…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button id="users-prev" disabled>← Anterior</button>
+          <span id="users-page-info">—</span>
+          <button id="users-next" disabled>Siguiente →</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Modal: detalle de usuario ──────────────────────────────────────────── -->
+<dialog id="user-modal" aria-labelledby="user-modal-title">
+  <div class="modal-header">
+    <h3 id="user-modal-title">Usuario</h3>
+    <button class="modal-close" id="user-modal-close" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="modal-body" id="user-modal-body"></div>
+</dialog>
+
+<!-- Tooltip (shared, one instance) -->
+<div id="tip" class="tip" hidden></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
 </html>

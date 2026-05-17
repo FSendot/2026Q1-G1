@@ -6,7 +6,13 @@ MODEL_PREP_DEST := app/processor/model/runtime_spec.json
 MODEL_PREP_FALLBACK_FILE_URL := https://drive.google.com/file/d/1Gut3LFjfYVpIEHJIXkzztcfZ6o-CRAwX/view?usp=sharing
 MODEL_PREP_FALLBACK_URL := https://drive.google.com/drive/folders/1DfGgK6dTXP-IS3bdqSl_kBCIkr6P9NR6?usp=sharing
 
-.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep
+LAMBDA_WRITER ?= itba-tp-fraud-results-writer
+REGION        ?= us-east-1
+COUNT         ?= 1000
+DAYS          ?= 30
+PYTHON        ?= $(shell which python3)
+
+.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep seed
 
 help:
 	@echo "Targets:"
@@ -21,6 +27,7 @@ help:
 	@echo "  make apply         Apply the saved plan"
 	@echo "  make destroy       Destroy all managed infrastructure"
 	@echo "  make clean         Remove .terraform/ and tfplan files"
+	@echo "  make seed          Seed RDS with ~COUNT mock transactions (default COUNT=1000, DAYS=30)"
 
 fmt:
 	terraform fmt -recursive
@@ -88,3 +95,10 @@ prepare-model:
 	  --drive-folder-url "$(MODEL_PREP_FALLBACK_URL)"
 
 model-prep: prepare-model
+
+seed:
+	$(PYTHON) scripts/generate_mock_data.py \
+	  --function $(LAMBDA_WRITER) \
+	  --region $(REGION) \
+	  --count $(COUNT) \
+	  --days $(DAYS)
