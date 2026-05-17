@@ -64,6 +64,8 @@ func ResolveRuntimeSpecPath() (string, error) {
 
 func candidateRuntimeSpecPaths() []string {
 	return []string{
+		filepath.Join("model", runtimeSpecFilename),
+		filepath.Join("processor", "model", runtimeSpecFilename),
 		filepath.Join("..", "net", "outputs", "go_runtime", "model_v1", runtimeSpecFilename),
 		filepath.Join("net", "outputs", "go_runtime", "model_v1", runtimeSpecFilename),
 	}
@@ -73,6 +75,8 @@ func runtimeSpecPathsFromRoot(start string) []string {
 	var candidates []string
 	current := start
 	for {
+		candidates = append(candidates, filepath.Join(current, "model", runtimeSpecFilename))
+		candidates = append(candidates, filepath.Join(current, "processor", "model", runtimeSpecFilename))
 		candidates = append(candidates, filepath.Join(current, "net", "outputs", "go_runtime", "model_v1", runtimeSpecFilename))
 		parent := filepath.Dir(current)
 		if parent == current {

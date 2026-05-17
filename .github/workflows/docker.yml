@@ -1,0 +1,87 @@
+name: Docker
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/processor/**"
+      - "app/net/serving/go/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "app/processor/**"
+      - "app/net/serving/go/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      TF_IN_AUTOMATION: true
+      TF_INPUT: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare runtime spec
+        run: make prepare-model
+
+      - name: Build image
+        run: docker build -f app/processor/Dockerfile -t "fraud-worker:${GITHUB_SHA}" app
+
+      - name: Set up Terraform
+        if: github.ref == 'refs/heads/main'
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        if: github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Initialize Terraform
+        if: github.ref == 'refs/heads/main'
+        run: make init
+
+      - name: Read ECR repository URL
+        if: github.ref == 'refs/heads/main'
+        id: ecr
+        run: echo "url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ECR
+        if: github.ref == 'refs/heads/main'
+        run: |
+          registry="${{ steps.ecr.outputs.url }}"
+          registry="${registry%%/*}"
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
+
+      - name: Tag image for ECR
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:latest"
+
+      - name: Push image
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker push "${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
+          docker push "${{ steps.ecr.outputs.url }}:latest"
+
+      - name: Terraform plan
+        if: github.ref == 'refs/heads/main'
+        run: terraform plan -out=tfplan -var "image_uri=${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
+
+      - name: Terraform apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve tfplan

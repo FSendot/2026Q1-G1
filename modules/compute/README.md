@@ -4,10 +4,10 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 
 ## Resources
 
-- `aws_ecr_repository.app` — `<project>/fraud-engine`. Image tag mutability `IMMUTABLE`, scan-on-push enabled, AES256 encryption (KMS-CMK skipped — AWS Academy).
+- `aws_ecr_repository.app` — `<project>/fraud-engine`. Image tag mutability `MUTABLE`, scan-on-push enabled, AES256 encryption (KMS-CMK skipped — AWS Academy).
 - `aws_cloudwatch_log_group.app` — `/ecs/<project>-fraud-engine`. Retention configurable via `log_retention_days`.
 - `aws_ecs_cluster.main` — `<project>-cluster`, `containerInsights = enabled`.
-- `aws_ecs_task_definition.app` — Fargate, awsvpc, X86_64/Linux. Both `task_role_arn` and `execution_role_arn` are passed in (LabRole in the lab). The container runs with `readonlyRootFilesystem = true`, `privileged = false`, and gets `AWS_REGION`, `QUEUE_URL`, `QUEUE_NAME`, and `TABLE_NAME` as env vars.
+- `aws_ecs_task_definition.app` — Fargate, awsvpc, X86_64/Linux. Both `task_role_arn` and `execution_role_arn` are passed in (LabRole in the lab). The container runs with `readonlyRootFilesystem = true`, `privileged = false`, and gets `AWS_REGION`, `QUEUE_URL`, `QUEUE_NAME`, `DYNAMODB_TABLE_NAME`, and `SNS_TOPIC_ARN` as env vars.
 - `aws_ecs_service.app` — runs `desired_count` tasks across `private_subnet_ids`, `assign_public_ip = false`, attached to the dedicated task SG. `lifecycle { ignore_changes = [desired_count] }` so Application Auto Scaling owns the running count.
 - `aws_security_group.task` — ingress empty, egress only to the endpoint SG on tcp/443.
 - `aws_appautoscaling_target.ecs` — Application Auto Scaling target on `ecs:service:DesiredCount`.
@@ -25,7 +25,7 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 | `endpoint_security_group_id`      | `string`       | n/a     | Endpoint SG; the task SG only egresses here on tcp/443.                  |
 | `task_role_arn`                   | `string`       | n/a     | LabRole ARN (task role).                                                 |
 | `execution_role_arn`              | `string`       | n/a     | LabRole ARN (execution role).                                            |
-| `image_uri`                       | `string`       | `""`    | Full image URI; falls back to `<ecr_url>:placeholder` when empty.        |
+| `image_uri`                       | `string`       | `""`    | Full image URI; CI passes `<ecr_url>:<sha>` and Terraform falls back to `<ecr_url>:placeholder` when empty. |
 | `task_cpu`                        | `number`       | `512`   | Fargate CPU units.                                                       |
 | `task_memory`                     | `number`       | `1024`  | Fargate memory (MiB).                                                    |
 | `desired_count`                   | `number`       | `2`     | Initial task count.                                                      |
@@ -34,7 +34,7 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 | `queue_arn`                       | `string`       | n/a     | SQS queue ARN.                                                           |
 | `queue_url`                       | `string`       | n/a     | SQS queue URL (env var).                                                 |
 | `queue_name`                      | `string`       | n/a     | SQS queue name (used in CloudWatch metric dimensions).                   |
-| `table_name`                      | `string`       | n/a     | DynamoDB table name (env var).                                           |
+| `table_name`                      | `string`       | n/a     | DynamoDB table name passed to the container as `DYNAMODB_TABLE_NAME`.    |
 | `log_retention_days`              | `number`       | `30`    | CloudWatch Logs retention.                                               |
 | `scaling_target_messages_per_task`| `number`       | `10`    | Target tracking value for messages-per-task.                             |
 
@@ -54,7 +54,7 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 
 ## Terraform features used (academic checklist)
 
-- **Functions**: `format`, `merge`, `jsonencode`, `coalesce`-style ternary on `image_uri`, `length` (validations), `contains` (validations).
+- **Functions**: `format`, `merge`, `jsonencode`, ternary on `image_uri`, `length` (validations), `contains` (validations).
 - **Meta-arguments**:
   - `lifecycle { ignore_changes = [desired_count] }` on `aws_ecs_service.app` so Auto Scaling owns the count.
   - `depends_on` on the service waiting for the SG egress rule (and indirectly on the network module's interface endpoints, since they share the endpoint SG).

@@ -48,7 +48,7 @@ locals {
 resource "aws_ecr_repository" "app" {
   # checkov:skip=CKV_AWS_136: AWS Academy no permite KMS CMK; AES256 (default) cumple el requisito de cifrado at-rest.
   name                 = local.ecr_repository_name
-  image_tag_mutability = "IMMUTABLE"
+  image_tag_mutability = "MUTABLE"
   force_delete         = true
 
   image_scanning_configuration {

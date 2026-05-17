@@ -1,4 +1,8 @@
-.PHONY: help fmt fmt-check validate lint init plan apply destroy clean
+.PHONY: help fmt fmt-check validate lint init plan apply destroy clean prepare-model model-prep
+
+MODEL_PREP_SOURCE := app/net/outputs/go_runtime/model_v1/runtime_spec.json
+MODEL_PREP_DEST := app/processor/model/runtime_spec.json
+MODEL_PREP_FALLBACK_URL := https://drive.google.com/drive/folders/1DfGgK6dTXP-IS3bdqSl_kBCIkr6P9NR6?usp=sharing
 
 help:
 	@echo "Targets:"
@@ -11,6 +15,7 @@ help:
 	@echo "  make apply      Apply the saved plan"
 	@echo "  make destroy    Destroy all managed infrastructure"
 	@echo "  make clean      Remove .terraform/ and tfplan files"
+	@echo "  make prepare-model Prepare app/processor/model/runtime_spec.json for container builds"
 
 fmt:
 	terraform fmt -recursive
@@ -49,3 +54,11 @@ destroy:
 clean:
 	find . -type d -name ".terraform" -exec rm -rf {} +
 	find . -type f -name "tfplan" -delete
+
+prepare-model:
+	python3 scripts/prepare_runtime_spec.py \
+	  --source "$(MODEL_PREP_SOURCE)" \
+	  --dest "$(MODEL_PREP_DEST)" \
+	  --drive-folder-url "$(MODEL_PREP_FALLBACK_URL)"
+
+model-prep: prepare-model

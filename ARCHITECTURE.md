@@ -30,7 +30,7 @@ Hard constraints driving the design:
 | SQS results queue + DLQ                | `modules/results_writer` | custom | Buffer between SNS and the writer Lambda. `maxReceiveCount = 3`, visibility timeout 180 s.                   |
 | Lambda results-writer                  | `modules/results_writer` | custom | Python 3.12, in VPC, triggered by SQS. Placeholder; connect to RDS with a psycopg2 layer.                   |
 | HTTP API Gateway + Lambda              | `modules/api`        | custom    | `GET /transactions`. Lambda in VPC to reach RDS. CORS enabled. Placeholder; connect to RDS.                    |
-| ECR repo                               | `modules/compute`  | custom    | `IMMUTABLE` tags, scan-on-push.                                                                                 |
+| ECR repo                               | `modules/compute`  | custom    | `MUTABLE` tags, scan-on-push.                                                                                   |
 | ECS Cluster (Container Insights on)    | `modules/compute`  | custom    | Single cluster.                                                                                                 |
 | Fargate task definition                | `modules/compute`  | custom    | LabRole as both task and execution role (lab constraint).                                                       |
 | ECS service (2 tasks, private subnets) | `modules/compute`  | custom    | `assign_public_ip = false`, `lifecycle { ignore_changes = [desired_count] }` so autoscaling owns capacity.       |
@@ -67,7 +67,7 @@ From the on-prem side, the SQS hostname `sqs.<region>.amazonaws.com` resolves pr
 - **`LabRole` as both task and execution role** — AWS Academy disallows creating new roles. Documented `CKV_AWS_249` skip on `aws_ecs_task_definition`.
 - **On-prem simulation is BGP-only and single-AZ.** `modules/onprem_sim` is intentionally minimal (one public subnet, permissive SG, one EC2 router). It can be disabled with `var.enable_onprem_sim = false` to skip both the VPN connection costs and the strongSwan stack rollout.
 - **No VPC Flow Logs** — intentionally skipped for the lab footprint. Re-enable later when the Checkov `CKV2_AWS_11` finding becomes a hard requirement.
-- **Application image** is built and pushed outside Terraform. The ECR repo is provisioned empty; the first deployment fails until a real image is pushed.
+- **Application image** is built in GitHub Actions, tagged with the commit SHA, pushed to ECR on `main`, and passed back into Terraform as `image_uri`. The ECR repo uses mutable tags so the CI `latest` tag can move with the SHA tag.
 - **Local Terraform backend.** Remote S3+DynamoDB backend is documented as a stub in `backend.tf`.
 
 ## 6. How the academic minima are met

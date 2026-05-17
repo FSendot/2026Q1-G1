@@ -35,10 +35,15 @@ func NewFraudHandler(dynamoClient *dynamo.Client, scoringEngine *scoring.Engine,
 }
 
 func (h *FraudHandler) ProcessTransaction(ctx context.Context, req *pb.ProcessTransactionRequest) (*pb.TransactionResponse, error) {
+	response, _, err := h.ProcessTransactionEvent(ctx, req)
+	return response, err
+}
+
+func (h *FraudHandler) ProcessTransactionEvent(ctx context.Context, req *pb.ProcessTransactionRequest) (*pb.TransactionResponse, *EnrichedEvent, error) {
 	requestStartedAt := time.Now()
 	correlationID := uuid.New().String()
 	if err := validateRequest(req); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	transaction := req.GetTransaction()
 	trace := req.GetTrace()
@@ -57,14 +62,14 @@ func (h *FraudHandler) ProcessTransaction(ctx context.Context, req *pb.ProcessTr
 	profileLookupDuration := time.Since(profileLookupStartedAt)
 	if err != nil {
 		log.Printf("[%s] error getting profile after %.2fms: %v", correlationID, durationMillis(profileLookupDuration), err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	scoringStartedAt := time.Now()
 	result, err := h.scoringEngine.ScoreTransaction(req, correlationID)
 	scoringDuration := time.Since(scoringStartedAt)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	log.Printf("[%s] scored transaction %s with model=%s calibrated_score=%.4f action=%s decision=%s lookup_ms=%.2f scoring_ms=%.2f",
@@ -83,25 +88,25 @@ func (h *FraudHandler) ProcessTransaction(ctx context.Context, req *pb.ProcessTr
 	enriched := buildEnrichedEvent(req, profile, result, correlationID, amount)
 	if h.rds != nil {
 		if err := h.rds.InsertTransaction(ctx, &store.TransactionRecord{
-			TransactionID:           enriched.TransactionID,
-			UserID:                  enriched.UserID,
-			PersonID:                enriched.PersonID,
-			AccountID:               enriched.AccountID,
-			Amount:                  enriched.Amount,
-			Currency:                enriched.Currency,
-			Timestamp:               enriched.Timestamp,
-			Channel:                 enriched.Channel,
-			DestinationAccount:      enriched.DestinationAccount,
-			Country:                 enriched.Country,
-			Score:                   enriched.Score,
-			Decision:                enriched.Decision,
-			ProfileAvgAmount:        enriched.ProfileAvgAmount,
-			ProfileStdDev:           enriched.ProfileStdDev,
-			ProfileTxLast10Min:      enriched.ProfileTxLast10Min,
-			ModelVersion:            enriched.ModelVersion,
-			CalibratedScore:         enriched.CalibratedScore,
-			ProcessorVersion:        enriched.ProcessorVersion,
-			ProcessedAt:             time.Now().UTC(),
+			TransactionID:      enriched.TransactionID,
+			UserID:             enriched.UserID,
+			PersonID:           enriched.PersonID,
+			AccountID:          enriched.AccountID,
+			Amount:             enriched.Amount,
+			Currency:           enriched.Currency,
+			Timestamp:          enriched.Timestamp,
+			Channel:            enriched.Channel,
+			DestinationAccount: enriched.DestinationAccount,
+			Country:            enriched.Country,
+			Score:              enriched.Score,
+			Decision:           enriched.Decision,
+			ProfileAvgAmount:   enriched.ProfileAvgAmount,
+			ProfileStdDev:      enriched.ProfileStdDev,
+			ProfileTxLast10Min: enriched.ProfileTxLast10Min,
+			ModelVersion:       enriched.ModelVersion,
+			CalibratedScore:    enriched.CalibratedScore,
+			ProcessorVersion:   enriched.ProcessorVersion,
+			ProcessedAt:        time.Now().UTC(),
 		}); err != nil {
 			log.Printf("[%s] error inserting to RDS: %v", correlationID, err)
 		}
@@ -137,7 +142,7 @@ func (h *FraudHandler) ProcessTransaction(ctx context.Context, req *pb.ProcessTr
 		durationMillis(profileUpdateDuration),
 	)
 
-	return &pb.TransactionResponse{
+	response := &pb.TransactionResponse{
 		TransactionId:           transaction.GetTransactionId(),
 		Decision:                result.Decision,
 		Score:                   result.Score,
@@ -150,7 +155,8 @@ func (h *FraudHandler) ProcessTransaction(ctx context.Context, req *pb.ProcessTr
 		ProfileLookupDurationMs: durationMillis(profileLookupDuration),
 		ScoringDurationMs:       durationMillis(scoringDuration),
 		ProfileUpdateDurationMs: durationMillis(profileUpdateDuration),
-	}, nil
+	}
+	return response, enriched, nil
 }
 
 func durationMillis(duration time.Duration) float64 {

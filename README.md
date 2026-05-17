@@ -67,6 +67,18 @@ make plan         # writes tfplan; review the diff carefully
 make apply        # applies the saved tfplan
 ```
 
+Before building the worker container locally, run `make prepare-model`. It copies `app/net/outputs/go_runtime/model_v1/runtime_spec.json` into `app/processor/model/runtime_spec.json`, or falls back to the shared Google Drive folder when the exported spec is absent. The fallback uses only Python's standard library.
+
+Docker deployment flow:
+
+```bash
+make init        # creates/configures the state bucket and initializes Terraform
+# run the manual Apply workflow once to create ECR with the placeholder image
+# run the Docker workflow manually on main to build, push, and re-apply with image_uri
+```
+
+After that bootstrap, pushes to `main` that change `app/processor/**` or `app/net/serving/go/**` build the worker image, push `${GITHUB_SHA}` and `latest` to ECR, and apply Terraform with the SHA-tagged image URI. Terraform changes alone do not trigger the Docker workflow.
+
 Tear down at the end of the lab session:
 
 ```bash
@@ -87,6 +99,7 @@ make lint         # checkov -d .
 
 - `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`, `backend.tf` — root composition.
 - `modules/` — reusable building blocks (`network`, `queue`, `data_store`, `compute`, `onprem_sim`, `notification`, `results_writer`, `api`); each has its own `README.md`.
+- `.github/workflows/docker.yml` — builds the processor image from `app/processor/Dockerfile` using `app/` as the build context and deploys the SHA-tagged image through Terraform on `main`.
 - `ARCHITECTURE.md` — high-level architecture and trade-offs.
 - `docs/STRUCTURE.md`, `STYLE_GUIDE.md`, `NAMING.md`, `WORKFLOW.md`, `SECURITY.md`, `CONSIGNA.md` — repo conventions and the academic brief.
 - `AGENTS.md` — guardrails for AI coding agents.

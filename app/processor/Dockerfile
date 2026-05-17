@@ -1,19 +1,24 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
-WORKDIR /app
+WORKDIR /app/processor
 
-COPY go.mod go.sum ./
+COPY processor/go.mod processor/go.sum ./
+COPY net/serving/go ../net/serving/go
 RUN go mod download
 
-COPY . .
-RUN CGO_ENABLED=0 go build -o /fraud-processor ./cmd/server
+COPY processor/cmd ./cmd
+COPY processor/internal ./internal
+COPY processor/proto ./proto
+RUN CGO_ENABLED=0 go build -o /fraud-worker ./cmd/worker
 
-FROM alpine:3.19
+FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates
 
-COPY --from=builder /fraud-processor /fraud-processor
+COPY --from=builder /fraud-worker /fraud-worker
+RUN mkdir -p /model
+COPY processor/model/runtime_spec.json /model/runtime_spec.json
 
-EXPOSE 50051
+ENV FRAUD_RUNTIME_SPEC_PATH=/model/runtime_spec.json
 
-ENTRYPOINT ["/fraud-processor"]
+ENTRYPOINT ["/fraud-worker"]

@@ -1,0 +1,14 @@
+.git
+net/data/
+net/artifacts/
+net/outputs/
+net/predictions/
+net/reports/
+net/.venv/
+processor/output/
+processor/dist/
+processor/*.test
+processor/*.exe
+processor/client
+processor/fraud-processor
+processor/*.tar.gz

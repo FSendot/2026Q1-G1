@@ -46,6 +46,7 @@ net/*.log
 net/*.sqlite3
 Pipfile.lock
 
+processor/model/*
 processor/output/
 processor/dist/
 labsuser.pem
