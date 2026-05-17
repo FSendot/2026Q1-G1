@@ -69,7 +69,7 @@ variable "dlq_message_retention_seconds" {
 }
 
 variable "onprem_vpc_cidr" {
-  description = "CIDR de la VPC on-premise simulada. Cuando es no vacío, la política de la cola deniega sqs:SendMessage salvo que la IP origen pertenezca a ese CIDR (vía aws:VpcSourceIp), restringiendo así la producción de mensajes exclusivamente al sitio on-premise."
+  description = "CIDR de la VPC on-premise simulada. Mantenido por compatibilidad; la restricción de SendMessage ahora usa onprem_vpc_id (aws:SourceVpc) en lugar de CIDR."
   type        = string
   default     = ""
 
@@ -77,4 +77,10 @@ variable "onprem_vpc_cidr" {
     condition     = var.onprem_vpc_cidr == "" || can(cidrhost(var.onprem_vpc_cidr, 0))
     error_message = "onprem_vpc_cidr debe ser un bloque CIDR IPv4 válido o quedar vacío para desactivar la restricción."
   }
+}
+
+variable "onprem_vpc_id" {
+  description = "ID de la VPC autorizada para SendMessage vía aws:SourceVpc. Para tráfico cross-VPC via VPN, aws:SourceVpc refleja la VPC donde reside el endpoint (fraud-detector VPC), no la VPC de origen. Se pasa el ID de la fraud-detector VPC para cubrir ambos casos."
+  type        = string
+  default     = ""
 }

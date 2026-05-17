@@ -46,13 +46,15 @@ module "network" {
 }
 
 # Cuando la simulación on-premise está activa, la cola sólo acepta
-# SendMessage desde el CIDR on-premise (vía aws:VpcSourceIp).
+# SendMessage desde la VPC on-premise (vía aws:SourceVpc), que funciona
+# tanto para tráfico intra-VPC como cross-VPC via VPN.
 module "queue" {
   source = "./modules/queue"
 
   project         = local.project
   principal_arn   = data.aws_iam_role.lab.arn
   onprem_vpc_cidr = var.enable_onprem_sim ? local.onprem_vpc_cidr : ""
+  onprem_vpc_id   = var.enable_onprem_sim ? module.network.vpc_id : ""
   tags            = local.common_tags
 }
 
