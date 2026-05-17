@@ -3,6 +3,7 @@ PSYCOPG2_ZIP     := layers/psycopg2/psycopg2-layer.zip
 
 MODEL_PREP_SOURCE := app/net/outputs/go_runtime/model_v1/runtime_spec.json
 MODEL_PREP_DEST := app/processor/model/runtime_spec.json
+MODEL_PREP_FALLBACK_FILE_URL := https://drive.google.com/file/d/1Gut3LFjfYVpIEHJIXkzztcfZ6o-CRAwX/view?usp=sharing
 MODEL_PREP_FALLBACK_URL := https://drive.google.com/drive/folders/1DfGgK6dTXP-IS3bdqSl_kBCIkr6P9NR6?usp=sharing
 
 .PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep
@@ -81,6 +82,7 @@ prepare-model:
 	python3 scripts/prepare_runtime_spec.py \
 	  --source "$(MODEL_PREP_SOURCE)" \
 	  --dest "$(MODEL_PREP_DEST)" \
+	  --drive-file-url "$(MODEL_PREP_FALLBACK_FILE_URL)" \
 	  --drive-folder-url "$(MODEL_PREP_FALLBACK_URL)"
 
 model-prep: prepare-model

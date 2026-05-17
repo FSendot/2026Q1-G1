@@ -44,6 +44,8 @@ id_rsa*
 .cursorrules
 
 # Local tooling caches and binaries (per-developer, not shared)
+__pycache__/
+*.pyc
 .pre-commit-cache/
 .tools/
 .virtualenv-app-data/
