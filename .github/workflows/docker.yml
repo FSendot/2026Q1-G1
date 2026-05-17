@@ -85,13 +85,26 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: make init
 
+      - name: Bootstrap ECR repository
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if terraform output -raw ecr_repository_url >/tmp/ecr_repository_url 2>/dev/null; then
+            if [ -s /tmp/ecr_repository_url ]; then
+              exit 0
+            fi
+          fi
+
+          echo "No ECR repository output found yet; applying Terraform once with the placeholder image to create repository resources."
+          terraform plan -out=tfplan-bootstrap
+          terraform apply -auto-approve tfplan-bootstrap
+
       - name: Read ECR image metadata
         if: github.ref == 'refs/heads/main'
         id: ecr
         run: |
-          ecr_url="$(terraform output -raw ecr_repository_url)"
+          ecr_url="$(terraform output -raw ecr_repository_url 2>/dev/null)"
           if [ -z "$ecr_url" ]; then
-            echo "Terraform output ecr_repository_url is empty. Run the manual Apply workflow once to create the ECR repository before pushing an image." >&2
+            echo "Terraform output ecr_repository_url is empty after bootstrap apply." >&2
             exit 1
           fi
 
