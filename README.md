@@ -17,7 +17,8 @@ A single composition wires eight custom modules and one external module:
 | `modules/onprem_sim`      | Simulated on-prem VPC + EC2 strongSwan + CGW + Site-to-Site VPN. Toggle via `var.enable_onprem_sim`. |
 | `modules/notification`    | SNS results topic + optional email subscription for fraud alerts.                             |
 | `modules/results_writer`  | SQS results queue + DLQ + Lambda writer (SNS → SQS → Lambda → RDS).                          |
-| `modules/api`             | Lambda + HTTP API Gateway — dashboard endpoint `GET /transactions`.                           |
+| `modules/api`             | Lambda + HTTP API Gateway — endpoints `/transactions`, `/stats`, `/health`.                   |
+| `modules/dashboard`       | S3 static website — fraud results dashboard (vanilla JS, no build step).                      |
 | `terraform-aws-modules/vpc/aws ~> 5.13` | Base VPC, private subnets, VGW.                                             |
 
 ## Prerequisites
@@ -65,6 +66,12 @@ cp terraform.tfvars.example terraform.tfvars
 # adjust capacity values if needed
 ```
 
+Build the Lambda layers (required once before the first plan):
+
+```bash
+make build-layers
+```
+
 Plan and apply:
 
 ```bash
@@ -73,11 +80,37 @@ make plan         # writes tfplan; review the diff carefully
 make apply        # applies the saved tfplan
 ```
 
+After apply, get all relevant URLs:
+
+```bash
+terraform output dashboard_url   # fraud results dashboard
+terraform output api_endpoint    # REST API base URL
+```
+
 Tear down at the end of the lab session:
 
 ```bash
 make destroy
 ```
+
+## Dashboard
+
+The dashboard is a static web app hosted on S3 that shows real-time fraud results from the RDS database.
+
+**Access:**
+
+```bash
+terraform output -raw dashboard_url
+```
+
+Open that URL in a browser and log in with:
+
+| Field    | Value  |
+| -------- | ------ |
+| Usuario  | cloud  |
+| Contraseña | cloud |
+
+The dashboard updates automatically as the Fargate fraud processor scores transactions and publishes results to the SNS topic. Refresh the page to see new results.
 
 ## Quality gates
 
@@ -92,7 +125,7 @@ make lint         # checkov -d .
 ## Repo map
 
 - `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`, `backend.tf` — root composition.
-- `modules/` — reusable building blocks (`network`, `queue`, `data_store`, `compute`, `onprem_sim`, `notification`, `results_writer`, `api`); each has its own `README.md`.
+- `modules/` — reusable building blocks (`network`, `queue`, `data_store`, `compute`, `onprem_sim`, `notification`, `results_writer`, `api`, `dashboard`); each has its own `README.md`.
 - `ARCHITECTURE.md` — high-level architecture and trade-offs.
 - `docs/STRUCTURE.md`, `STYLE_GUIDE.md`, `NAMING.md`, `WORKFLOW.md`, `SECURITY.md`, `CONSIGNA.md` — repo conventions and the academic brief.
 - `AGENTS.md` — guardrails for AI coding agents.

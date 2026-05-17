@@ -154,6 +154,14 @@ module "api" {
   tags                       = local.common_tags
 }
 
+module "dashboard" {
+  source = "./modules/dashboard"
+
+  project      = local.project
+  api_endpoint = module.api.api_endpoint
+  tags         = local.common_tags
+}
+
 # Proxy ↔ RDS
 
 resource "aws_vpc_security_group_egress_rule" "proxy_to_rds" {
