@@ -44,6 +44,7 @@ def _ensure_schema(conn):
             );
             CREATE INDEX IF NOT EXISTS idx_tx_processed_at ON transactions (processed_at DESC);
             CREATE INDEX IF NOT EXISTS idx_tx_is_fraud     ON transactions (is_fraud);
+            CREATE INDEX IF NOT EXISTS idx_tx_user_id      ON transactions (user_id);
         """)
     conn.commit()
 
@@ -62,25 +63,32 @@ def handler(event, context):
                 cur.execute(
                     """
                     INSERT INTO transactions
-                        (transaction_id, user_id, fraud_score, is_fraud, decision)
+                        (transaction_id, user_id, amount, currency, country, channel,
+                         fraud_score, is_fraud, decision, processed_at)
                     VALUES
-                        (%(transaction_id)s, %(user_id)s, %(fraud_score)s,
-                         %(is_fraud)s, %(decision)s)
+                        (%(transaction_id)s, %(user_id)s, %(amount)s, %(currency)s,
+                         %(country)s, %(channel)s, %(fraud_score)s, %(is_fraud)s, %(decision)s,
+                         COALESCE(%(processed_at)s::timestamptz, NOW()))
                     ON CONFLICT (transaction_id) DO NOTHING
                     """,
                     {
                         "transaction_id": payload.get("transaction_id"),
-                        "user_id": payload.get("user_id"),
-                        "fraud_score": payload.get("fraud_score"),
-                        "is_fraud": bool(payload.get("is_fraud")),
-                        "decision": "block" if payload.get("is_fraud") else "allow",
+                        "user_id":        payload.get("user_id"),
+                        "amount":         payload.get("amount"),
+                        "currency":       payload.get("currency"),
+                        "country":        payload.get("country"),
+                        "channel":        payload.get("channel"),
+                        "fraud_score":    payload.get("fraud_score"),
+                        "is_fraud":       bool(payload.get("is_fraud")),
+                        "decision":       "block" if payload.get("is_fraud") else "allow",
+                        "processed_at":   payload.get("processed_at"),
                     },
                 )
             conn.commit()
             logger.info(json.dumps({
-                "action": "fraud_result_stored",
+                "action":         "fraud_result_stored",
                 "transaction_id": payload.get("transaction_id"),
-                "is_fraud": payload.get("is_fraud"),
+                "is_fraud":       payload.get("is_fraud"),
             }))
             processed += 1
         except Exception as exc:

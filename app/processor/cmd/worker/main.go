@@ -43,6 +43,10 @@ type Transaction struct {
 type ScoringResult struct {
 	TransactionID string  `json:"transaction_id"`
 	UserID        string  `json:"user_id"`
+	Amount        float64 `json:"amount"`
+	Currency      string  `json:"currency"`
+	Country       string  `json:"country"`
+	Channel       string  `json:"channel"`
 	FraudScore    float64 `json:"fraud_score"`
 	IsFraud       bool    `json:"is_fraud"`
 }
@@ -211,6 +215,10 @@ func processMessage(
 	result := ScoringResult{
 		TransactionID: tx.TransactionID,
 		UserID:        tx.UserID,
+		Amount:        tx.Amount,
+		Currency:      tx.Currency,
+		Country:       tx.Country,
+		Channel:       tx.Channel,
 		FraudScore:    fraudScore,
 		IsFraud:       isFraud,
 	}
