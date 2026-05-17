@@ -57,7 +57,8 @@ resource "aws_lambda_function" "api" {
   runtime       = "python3.12"
   handler       = "handler.handler"
   timeout       = 15
-  memory_size   = 128
+  memory_size   = 256
+  layers        = [var.psycopg2_layer_arn]
 
   filename         = data.archive_file.api_handler.output_path
   source_code_hash = data.archive_file.api_handler.output_base64sha256
@@ -134,6 +135,25 @@ resource "aws_apigatewayv2_integration" "lambda" {
 resource "aws_apigatewayv2_route" "get_transactions" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "GET /transactions"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_stats" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /stats"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_health" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /health"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+# Catch-all: permite paths con prefijo /api/ (usado por el dashboard)
+resource "aws_apigatewayv2_route" "default" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "$default"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 

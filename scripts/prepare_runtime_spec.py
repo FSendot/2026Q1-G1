@@ -11,6 +11,7 @@ import re
 import shutil
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -33,14 +34,19 @@ def main() -> int:
         print(f"runtime_spec={args.dest} source={args.source}")
         return 0
 
-    folder_id = extract_folder_id(args.drive_folder_url)
-    specs = find_runtime_specs(folder_id, max_depth=2)
-    if not specs:
-        print("No runtime_spec.json found in Google Drive fallback", file=sys.stderr)
+    try:
+        folder_id = extract_folder_id(args.drive_folder_url)
+        specs = find_runtime_specs(folder_id, max_depth=2)
+        if not specs:
+            print("No runtime_spec.json found in Google Drive fallback", file=sys.stderr)
+            return 1
+
+        selected = sorted(specs, key=lambda spec: (spec.model_version, spec.path))[-1]
+        download_drive_file(selected.file_id, args.dest)
+    except (OSError, RuntimeError, ValueError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        print(f"Failed to prepare runtime_spec.json from Google Drive fallback: {exc}", file=sys.stderr)
         return 1
 
-    selected = sorted(specs, key=lambda spec: (spec.model_version, spec.path))[-1]
-    download_drive_file(selected.file_id, args.dest)
     print(f"runtime_spec={args.dest} source=google-drive/{selected.path}")
     return 0
 

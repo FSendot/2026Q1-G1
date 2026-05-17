@@ -17,7 +17,8 @@ A single composition wires eight custom modules and one external module:
 | `modules/onprem_sim`      | Simulated on-prem VPC + EC2 strongSwan + CGW + Site-to-Site VPN. Toggle via `var.enable_onprem_sim`. |
 | `modules/notification`    | SNS results topic + optional email subscription for fraud alerts.                             |
 | `modules/results_writer`  | SQS results queue + DLQ + Lambda writer (SNS → SQS → Lambda → RDS).                          |
-| `modules/api`             | Lambda + HTTP API Gateway — dashboard endpoint `GET /transactions`.                           |
+| `modules/api`             | Lambda + HTTP API Gateway — endpoints `/transactions`, `/stats`, `/health`.                   |
+| `modules/dashboard`       | S3 static website — fraud results dashboard (vanilla JS, no build step).                      |
 | `terraform-aws-modules/vpc/aws ~> 5.13` | Base VPC, private subnets, VGW.                                             |
 
 ## Prerequisites
@@ -30,17 +31,23 @@ The lab provides the IAM role `LabRole`, which the composition reuses as both EC
 
 ## First-time bootstrap
 
-The Terraform state is stored in an S3 bucket (`itba-tp-fraud-tfstate`). The bucket must exist before the first `terraform init`. This is a one-time step per AWS account — once created, all team members share the same bucket.
+The Terraform state is stored in an S3 bucket named after your AWS account ID (`terraform-state-<account-id>`). The bucket must exist before the first `terraform init` — this is a one-time step per AWS Academy account.
+
+Since each team member has their own lab account, **everyone** must run this once:
 
 ```bash
-aws s3api create-bucket --bucket itba-tp-fraud-tfstate --region us-east-1
-aws s3api put-bucket-versioning \
-  --bucket itba-tp-fraud-tfstate \
-  --versioning-configuration Status=Enabled
-terraform init -migrate-state   # migrates any existing local state to S3
-```
+# 1. Find your account ID and copy it to the clipboard
+aws sts get-caller-identity --query Account --output text
 
-If you are starting from scratch with no prior local state, `terraform init` (without `-migrate-state`) is enough.
+# 2. Create the state bucket (replace <account-id> with the output above)
+aws s3api create-bucket --bucket terraform-state-<account-id> --region us-east-1
+aws s3api put-bucket-versioning \
+  --bucket terraform-state-<account-id> \
+  --versioning-configuration Status=Enabled
+
+# 3. Initialise Terraform (starting from scratch)
+terraform init -reconfigure
+```
 
 > **GitHub Actions** (plan / apply workflows) create the bucket automatically if it does not exist. No manual step is needed when running through CI.
 
@@ -57,6 +64,12 @@ Set up your `terraform.tfvars` from the example:
 ```bash
 cp terraform.tfvars.example terraform.tfvars
 # adjust capacity values if needed
+```
+
+Build the Lambda layers (required once before the first plan):
+
+```bash
+make build-layers
 ```
 
 Plan and apply:
@@ -79,11 +92,37 @@ make init        # creates/configures the state bucket and initializes Terraform
 
 After that bootstrap, pushes to `main` that change `app/processor/**` or `app/net/serving/go/**` build the worker image, push `${GITHUB_SHA}` and `latest` to ECR, and apply Terraform with the SHA-tagged image URI. Terraform changes alone do not trigger the Docker workflow.
 
+After apply, get all relevant URLs:
+
+```bash
+terraform output dashboard_url   # fraud results dashboard
+terraform output api_endpoint    # REST API base URL
+```
+
 Tear down at the end of the lab session:
 
 ```bash
 make destroy
 ```
+
+## Dashboard
+
+The dashboard is a static web app hosted on S3 that shows real-time fraud results from the RDS database.
+
+**Access:**
+
+```bash
+terraform output -raw dashboard_url
+```
+
+Open that URL in a browser and log in with:
+
+| Field    | Value  |
+| -------- | ------ |
+| Usuario  | cloud  |
+| Contraseña | cloud |
+
+The dashboard updates automatically as the Fargate fraud processor scores transactions and publishes results to the SNS topic. Refresh the page to see new results.
 
 ## Quality gates
 
@@ -98,7 +137,7 @@ make lint         # checkov -d .
 ## Repo map
 
 - `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`, `backend.tf` — root composition.
-- `modules/` — reusable building blocks (`network`, `queue`, `data_store`, `compute`, `onprem_sim`, `notification`, `results_writer`, `api`); each has its own `README.md`.
+- `modules/` — reusable building blocks (`network`, `queue`, `data_store`, `compute`, `onprem_sim`, `notification`, `results_writer`, `api`, `dashboard`); each has its own `README.md`.
 - `.github/workflows/docker.yml` — builds the processor image from `app/processor/Dockerfile` using `app/` as the build context and deploys the SHA-tagged image through Terraform on `main`.
 - `ARCHITECTURE.md` — high-level architecture and trade-offs.
 - `docs/STRUCTURE.md`, `STYLE_GUIDE.md`, `NAMING.md`, `WORKFLOW.md`, `SECURITY.md`, `CONSIGNA.md` — repo conventions and the academic brief.

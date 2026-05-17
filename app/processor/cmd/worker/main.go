@@ -9,10 +9,10 @@ import (
 	"os"
 	"time"
 
+	fraudruntime "github.com/FSendot/fraud-detector/net/serving/go/pkg/fraudruntime"
 	"github.com/FSendot/fraud-detector/processor/internal/dynamo"
 	"github.com/FSendot/fraud-detector/processor/internal/scoring"
 	"github.com/FSendot/fraud-detector/processor/internal/store"
-	fraudruntime "github.com/FSendot/fraud-detector/net/serving/go/pkg/fraudruntime"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	dynamosvc "github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -64,7 +64,7 @@ type mlScorer struct {
 	inner *fraudruntime.Scorer
 }
 
-func (s *mlScorer) score(_ context.Context, tx Transaction, _ *dynamo.UserProfile) (float64, bool) {
+func (s *mlScorer) score(_ context.Context, tx Transaction, profile *dynamo.UserProfile) (float64, bool) {
 	features := buildMLFeatures(tx, s.inner.Spec().FeatureContract.FeatureOrder)
 	result, err := s.inner.ScoreOne(fraudruntime.ScoreInput{
 		TransactionID: tx.TransactionID,
@@ -72,7 +72,7 @@ func (s *mlScorer) score(_ context.Context, tx Transaction, _ *dynamo.UserProfil
 	})
 	if err != nil {
 		log.Printf("ml engine error for tx=%s, falling back to rules: %v", tx.TransactionID, err)
-		return rulesScore(tx, &dynamo.UserProfile{})
+		return rulesScore(tx, profile)
 	}
 	return result.CalibratedScore, result.PredictedLabel == 1
 }

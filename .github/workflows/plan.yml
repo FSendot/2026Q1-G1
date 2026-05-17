@@ -28,6 +28,9 @@ jobs:
         with:
           terraform_version: "~> 1.9"
 
+      - name: Build Lambda layers
+        run: make build-layers
+
       - name: Init
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)

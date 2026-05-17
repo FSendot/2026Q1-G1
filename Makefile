@@ -1,21 +1,25 @@
-.PHONY: help fmt fmt-check validate lint init plan apply destroy clean prepare-model model-prep
+PSYCOPG2_VERSION := 2.9.10
+PSYCOPG2_ZIP     := layers/psycopg2/psycopg2-layer.zip
 
 MODEL_PREP_SOURCE := app/net/outputs/go_runtime/model_v1/runtime_spec.json
 MODEL_PREP_DEST := app/processor/model/runtime_spec.json
 MODEL_PREP_FALLBACK_URL := https://drive.google.com/drive/folders/1DfGgK6dTXP-IS3bdqSl_kBCIkr6P9NR6?usp=sharing
 
+.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep
+
 help:
 	@echo "Targets:"
-	@echo "  make fmt        Format all Terraform files (in-place)"
-	@echo "  make fmt-check  Check formatting without modifying files (for CI)"
-	@echo "  make validate   Validate all Terraform files"
-	@echo "  make lint       Run checkov (Terraform)"
-	@echo "  make init       Initialize the working directory"
-	@echo "  make plan       Plan (writes tfplan)"
-	@echo "  make apply      Apply the saved plan"
-	@echo "  make destroy    Destroy all managed infrastructure"
-	@echo "  make clean      Remove .terraform/ and tfplan files"
+	@echo "  make fmt           Format all Terraform files (in-place)"
+	@echo "  make fmt-check     Check formatting without modifying files (for CI)"
+	@echo "  make validate      Validate all Terraform files"
+	@echo "  make lint          Run checkov (Terraform)"
+	@echo "  make build-layers  Build psycopg2 Lambda layer (required before first plan)"
 	@echo "  make prepare-model Prepare app/processor/model/runtime_spec.json for container builds"
+	@echo "  make init          Initialize the working directory"
+	@echo "  make plan          Plan (writes tfplan)"
+	@echo "  make apply         Apply the saved plan"
+	@echo "  make destroy       Destroy all managed infrastructure"
+	@echo "  make clean         Remove .terraform/ and tfplan files"
 
 fmt:
 	terraform fmt -recursive
@@ -32,6 +36,24 @@ validate:
 lint:
 	checkov -d . --framework terraform --quiet --compact
 
+# Builds the psycopg2 Lambda layer zip using a manylinux wheel — compatible with
+# Lambda AL2023 regardless of the host OS. Only runs when the zip doesn't exist yet;
+# delete the zip manually to force a rebuild (e.g. after bumping PSYCOPG2_VERSION).
+$(PSYCOPG2_ZIP):
+	@echo "Building psycopg2 layer (version $(PSYCOPG2_VERSION))..."
+	@mkdir -p layers/psycopg2/python
+	@python3 -m pip install "psycopg2-binary==$(PSYCOPG2_VERSION)" \
+	  --platform manylinux2014_x86_64 \
+	  --only-binary=:all: \
+	  --python-version 312 \
+	  --implementation cp \
+	  --target layers/psycopg2/python \
+	  --quiet
+	@cd layers/psycopg2 && zip -r psycopg2-layer.zip python/ -x "*.pyc" -x "*/__pycache__/*" > /dev/null
+	@echo "Layer ready: $(PSYCOPG2_ZIP)"
+
+build-layers: $(PSYCOPG2_ZIP)
+
 init:
 	ACCOUNT_ID=$$(aws sts get-caller-identity --query Account --output text) && \
 	BUCKET="itba-tp-fraud-tfstate-$${ACCOUNT_ID}" && \
@@ -42,7 +64,7 @@ init:
 	  --versioning-configuration Status=Enabled && \
 	terraform init -migrate-state -force-copy -backend-config="bucket=$${BUCKET}"
 
-plan:
+plan: $(PSYCOPG2_ZIP)
 	terraform plan -out=tfplan
 
 apply:
