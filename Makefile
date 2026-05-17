@@ -37,9 +37,7 @@ validate:
 lint:
 	checkov -d . --framework terraform --quiet --compact
 
-# Builds the psycopg2 Lambda layer zip using a manylinux wheel — compatible with
-# Lambda AL2023 regardless of the host OS. Only runs when the zip doesn't exist yet;
-# delete the zip manually to force a rebuild (e.g. after bumping PSYCOPG2_VERSION).
+# Builds the psycopg2 Lambda layer zip using a manylinux wheel
 $(PSYCOPG2_ZIP):
 	@echo "Building psycopg2 layer (version $(PSYCOPG2_VERSION))..."
 	@mkdir -p layers/psycopg2/python
