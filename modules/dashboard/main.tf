@@ -63,10 +63,6 @@ resource "aws_s3_object" "index_html" {
   content_type = "text/html"
 
   tags = local.module_tags
-
-  lifecycle {
-    ignore_changes = [source, source_hash]
-  }
 }
 
 resource "aws_s3_object" "app_js" {
@@ -77,10 +73,6 @@ resource "aws_s3_object" "app_js" {
   content_type = "application/javascript"
 
   tags = local.module_tags
-
-  lifecycle {
-    ignore_changes = [source, source_hash]
-  }
 }
 
 resource "aws_s3_object" "config_js" {
@@ -90,8 +82,4 @@ resource "aws_s3_object" "config_js" {
   content_type = "application/javascript"
 
   tags = local.module_tags
-
-  lifecycle {
-    ignore_changes = [content]
-  }
 }
