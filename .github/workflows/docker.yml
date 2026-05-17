@@ -68,6 +68,9 @@ jobs:
       - name: Set up Terraform
         if: github.ref == 'refs/heads/main'
         uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "~> 1.9"
+          terraform_wrapper: false
 
       - name: Configure AWS credentials
         if: github.ref == 'refs/heads/main'
@@ -82,32 +85,40 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: make init
 
-      - name: Read ECR repository URL
+      - name: Read ECR image metadata
         if: github.ref == 'refs/heads/main'
         id: ecr
-        run: echo "url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+        run: |
+          ecr_url="$(terraform output -raw ecr_repository_url)"
+          if [ -z "$ecr_url" ]; then
+            echo "Terraform output ecr_repository_url is empty. Run the manual Apply workflow once to create the ECR repository before pushing an image." >&2
+            exit 1
+          fi
+
+          short_sha="${GITHUB_SHA::12}"
+          processor_tag="processor-${short_sha}"
+
+          echo "url=${ecr_url}" >> "$GITHUB_OUTPUT"
+          echo "registry=${ecr_url%%/*}" >> "$GITHUB_OUTPUT"
+          echo "processor_tag=${processor_tag}" >> "$GITHUB_OUTPUT"
+          echo "processor_image=${ecr_url}:${processor_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ECR
+        if: github.ref == 'refs/heads/main'
+        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.ecr.outputs.registry }}"
 
       - name: Tag processor image for ECR
         if: github.ref == 'refs/heads/main'
         run: |
-          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:processor-${GITHUB_SHA}"
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.processor_image }}"
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:processor-latest"
-          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:latest"
-
-      - name: Log in to ECR
-        if: github.ref == 'refs/heads/main'
-        run: |
-          registry="${{ steps.ecr.outputs.url }}"
-          registry="${registry%%/*}"
-          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
 
       - name: Push processor image
         if: github.ref == 'refs/heads/main'
         run: |
-          docker push "${{ steps.ecr.outputs.url }}:processor-${GITHUB_SHA}"
+          docker push "${{ steps.ecr.outputs.processor_image }}"
           docker push "${{ steps.ecr.outputs.url }}:processor-latest"
-          docker push "${{ steps.ecr.outputs.url }}:${GITHUB_SHA}"
           docker push "${{ steps.ecr.outputs.url }}:latest"
 
       - name: Terraform plan
@@ -115,7 +126,7 @@ jobs:
         run: |
           terraform plan \
             -out=tfplan \
-            -var "image_uri=${{ steps.ecr.outputs.url }}:processor-${GITHUB_SHA}"
+            -var "image_uri=${{ steps.ecr.outputs.processor_image }}"
 
       - name: Terraform apply
         if: github.ref == 'refs/heads/main'
