@@ -104,6 +104,11 @@ output "proxy_endpoint" {
   value       = module.data_store.proxy_endpoint
 }
 
+output "dashboard_url" {
+  description = "URL del dashboard (S3 static website). Credenciales demo: cloud / cloud."
+  value       = module.dashboard.website_url
+}
+
 output "writer_lambda_name" {
   description = "Nombre de la Lambda que escribe resultados en RDS."
   value       = module.results_writer.lambda_function_name

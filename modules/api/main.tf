@@ -150,6 +150,13 @@ resource "aws_apigatewayv2_route" "get_health" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
+# Catch-all: permite paths con prefijo /api/ (usado por el dashboard)
+resource "aws_apigatewayv2_route" "default" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
 resource "aws_lambda_permission" "api_gw" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
