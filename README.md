@@ -304,7 +304,7 @@ make send-test-tx
 Por default envía 50.000 transacciones con 20% de fraude. Se puede ajustar:
 
 ```bash
-make send-test-tx TX_COUNT=10000 FRAUD_PCT=30
+make send-test-tx TX_COUNT=10000 FRAUD_PCT=30 TX_CONCURRENCY=256
 ```
 
 Para ejecutarlo localmente hace falta tener credenciales AWS activas, Terraform inicializado y `boto3` instalado en el Python que usa `make`:
@@ -315,7 +315,7 @@ make init
 make send-test-tx
 ```
 
-El script obtiene automáticamente el instance ID del EC2 on-prem desde CloudFormation y la queue URL desde el output de Terraform, construye un script Python/batch y lo ejecuta en el EC2 vía SSM (`AWS-RunShellScript`). El tráfico SQS viaja por el túnel VPN hacia el Interface VPC Endpoint, sin salir a internet. En el EC2 se usa la AWS CLI con `send-message-batch` para mandar hasta 10 mensajes por request a SQS.
+El script obtiene automáticamente el instance ID del EC2 on-prem desde CloudFormation y la queue URL desde el output de Terraform, construye un generador Go temporal y lo ejecuta en el EC2 vía SSM (`AWS-RunShellScript`). El tráfico SQS viaja por el túnel VPN hacia el Interface VPC Endpoint, sin salir a internet. En el EC2, el generador firma requests SQS con SigV4 y dispara `SendMessageBatch` con hasta 10 mensajes por request desde workers concurrentes. `TX_CONCURRENCY` controla cuántos batches simultáneos se intentan enviar; subirlo sirve para probar el límite de ingesta del pipeline, pero también puede saturar la instancia on-prem, SQS o el procesamiento downstream.
 
 Cada transacción incluye features de ML pre-computados y aleatorizados (card/addr/velocity/identity signals) para que el modelo pueda diferenciar fraude de transacciones legítimas:
 - **Normal**: usuarios recurrentes y nuevos, importes bajos/medios, beneficiarios conocidos, dispositivo estable y gaps de horas o días.
@@ -327,7 +327,7 @@ También existe una GitHub Action manual, **Send test transactions**, para gener
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_SESSION_TOKEN`
 
-La Action permite ajustar `count`, `fraud_pct`, `region`, `stack`, y opcionalmente pasar `queue_url` o `instance_id` para evitar leerlos desde Terraform/CloudFormation.
+La Action permite ajustar `count`, `fraud_pct`, `concurrency`, `region`, `stack`, y opcionalmente pasar `queue_url` o `instance_id` para evitar leerlos desde Terraform/CloudFormation.
 
 ### Paso 2 — Ver los logs en tiempo real
 

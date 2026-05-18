@@ -11,6 +11,10 @@ on:
         description: Percentage of transactions using the fraud pattern.
         required: true
         default: "20"
+      concurrency:
+        description: Concurrent SQS batch sender workers on the on-prem EC2.
+        required: true
+        default: "128"
       region:
         description: AWS region.
         required: true
@@ -74,6 +78,7 @@ jobs:
             --region "${{ inputs.region }}"
             --count "${{ inputs.count }}"
             --fraud-pct "${{ inputs.fraud_pct }}"
+            --concurrency "${{ inputs.concurrency }}"
           )
 
           if [ -n "${{ inputs.queue_url }}" ]; then
