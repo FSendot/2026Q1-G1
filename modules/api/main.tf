@@ -268,6 +268,7 @@ resource "aws_apigatewayv2_route" "cors_preflight" {
 
   api_id             = aws_apigatewayv2_api.main.id
   route_key          = each.value
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
   authorization_type = "NONE"
 }
 
