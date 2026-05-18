@@ -15,7 +15,8 @@ Provisions the dashboard API: a Lambda function running inside the VPC (to reach
 - `aws_apigatewayv2_route.get_transactions` — `GET /transactions`.
 - `aws_apigatewayv2_route.get_health` — `GET /health`.
 - Dashboard auth routes — `GET /dashboard/me`, `PUT /dashboard/me/password`, `GET|POST /dashboard/invites`, `DELETE /dashboard/invites/{id}`.
-- `aws_apigatewayv2_route.cors_preflight` — unauthenticated `OPTIONS /{proxy+}` so browser CORS preflight is handled by API Gateway before the JWT-protected `$default` route.
+- `aws_apigatewayv2_route.cors_preflight` — unauthenticated `OPTIONS` routes for the dashboard API paths so browser CORS preflight is handled before JWT checks.
+- `aws_apigatewayv2_route.default` — JWT-protected fallback route.
 - `aws_lambda_permission.api_gw` — allows API Gateway (`apigateway.amazonaws.com`) to invoke the Lambda, scoped to this API's execution ARN.
 
 ## Inputs
@@ -85,4 +86,4 @@ The dashboard API is intentionally Lambda-based. It serves low-volume, request-d
 
 - Checkov `CKV_AWS_272` (code signing), `CKV_AWS_50` (X-Ray), `CKV_AWS_116` (Lambda DLQ), `CKV2_AWS_29` (WAF), and `CKV_AWS_76` (API Gateway access logging) are skipped — all are lab cost or Academy restriction trade-offs.
 - `LabRole` is used as the Lambda execution role (Academy restriction).
-- API Gateway is public at the network edge. Real data routes use the Cognito JWT authorizer; only `OPTIONS /{proxy+}` is unauthenticated so browser CORS preflight can complete. In production, also consider a resource policy or WAF.
+- API Gateway is public at the network edge. Real data routes and `$default` use the Cognito JWT authorizer; only `OPTIONS` preflight routes are unauthenticated so browser CORS preflight can complete. The Lambda still performs app-level authorization on every non-health, non-OPTIONS request. In production, also consider a resource policy or WAF.

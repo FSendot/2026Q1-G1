@@ -9,8 +9,9 @@ on:
       - "app/api/**"
       - "app/dashboard/**"
       - "app/net/serving/go/**"
-      - "modules/api/**"
-      - "modules/dashboard/**"
+      - "modules/**"
+      - "scripts/**"
+      - "templates/**"
       - ".github/workflows/docker.yml"
       - "main.tf"
       - "variables.tf"
@@ -23,8 +24,9 @@ on:
       - "app/api/**"
       - "app/dashboard/**"
       - "app/net/serving/go/**"
-      - "modules/api/**"
-      - "modules/dashboard/**"
+      - "modules/**"
+      - "scripts/**"
+      - "templates/**"
       - ".github/workflows/docker.yml"
       - "main.tf"
       - "variables.tf"
@@ -50,15 +52,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Prepare runtime spec
         run: make prepare-model
 
-      - name: Build processor image
-        run: docker build -f app/processor/Dockerfile -t "fraud-worker:${GITHUB_SHA}" app
+      - name: Compute processor source key
+        id: processor_source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_key="$(
+            {
+              find app/processor app/net/serving/go -type f | sort
+              printf '%s\n' \
+                app/processor/model/runtime_spec.json \
+                scripts/prepare_runtime_spec.py \
+                app/processor/Dockerfile \
+                Makefile
+            } | sort -u | xargs sha256sum | sha256sum | cut -c1-16
+          )"
+
+          echo "key=${source_key}" >> "$GITHUB_OUTPUT"
+          echo "tag=processor-src-${source_key}" >> "$GITHUB_OUTPUT"
 
       - name: Build API image
         run: docker build -f app/api/Dockerfile -t "fraud-api:${GITHUB_SHA}" app
+
+      - name: Build processor image for validation
+        if: github.ref != 'refs/heads/main'
+        run: docker build -f app/processor/Dockerfile -t "fraud-worker:${GITHUB_SHA}" app
 
       - name: Build dashboard static export
         if: github.ref != 'refs/heads/main'
@@ -101,9 +126,9 @@ jobs:
             exit 0
           fi
 
-          echo "No ECR repository output found yet; applying Terraform once with the placeholder image to create repository resources."
-          terraform plan -out=tfplan-bootstrap
-          terraform apply -auto-approve tfplan-bootstrap
+          echo "No ECR repository output found yet; creating only the Terraform-managed ECR repository before the image push."
+          terraform plan -target=module.compute.aws_ecr_repository.app -out=tfplan-bootstrap-ecr
+          terraform apply -auto-approve tfplan-bootstrap-ecr
 
       - name: Read ECR image metadata
         if: github.ref == 'refs/heads/main'
@@ -123,24 +148,59 @@ jobs:
 
           echo "url=${ecr_url}" >> "$GITHUB_OUTPUT"
           echo "registry=${ecr_url%%/*}" >> "$GITHUB_OUTPUT"
+          echo "repository=${ecr_url#*/}" >> "$GITHUB_OUTPUT"
           echo "processor_tag=${processor_tag}" >> "$GITHUB_OUTPUT"
           echo "processor_image=${ecr_url}:${processor_tag}" >> "$GITHUB_OUTPUT"
+          echo "processor_source_image=${ecr_url}:${{ steps.processor_source.outputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve processor image deployment
+        if: github.ref == 'refs/heads/main'
+        id: processor_image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          should_build="false"
+          final_image="${{ steps.ecr.outputs.processor_image }}"
+
+          if aws ecr describe-images \
+            --region "$AWS_REGION" \
+            --repository-name "${{ steps.ecr.outputs.repository }}" \
+            --image-ids "imageTag=${{ steps.processor_source.outputs.tag }}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text >/tmp/source-image-digest 2>/dev/null; then
+            digest="$(cat /tmp/source-image-digest)"
+            echo "The processor source image already exists in ECR."
+            final_image="${{ steps.ecr.outputs.url }}@${digest}"
+          else
+            echo "No reusable processor source image exists in ECR; building a new image for this deploy."
+            should_build="true"
+          fi
+
+          echo "should_build=${should_build}" >> "$GITHUB_OUTPUT"
+          echo "final_image=${final_image}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ECR
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.processor_image.outputs.should_build == 'true'
         run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.ecr.outputs.registry }}"
 
+      - name: Build processor image
+        if: github.ref == 'refs/heads/main' && steps.processor_image.outputs.should_build == 'true'
+        run: docker build -f app/processor/Dockerfile -t "fraud-worker:${GITHUB_SHA}" app
+
       - name: Tag processor image for ECR
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.processor_image.outputs.should_build == 'true'
         run: |
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.processor_image }}"
+          docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.processor_source_image }}"
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:processor-latest"
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:latest"
 
       - name: Push processor image
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && steps.processor_image.outputs.should_build == 'true'
         run: |
           docker push "${{ steps.ecr.outputs.processor_image }}"
+          docker push "${{ steps.ecr.outputs.processor_source_image }}"
           docker push "${{ steps.ecr.outputs.url }}:processor-latest"
           docker push "${{ steps.ecr.outputs.url }}:latest"
 
@@ -149,7 +209,7 @@ jobs:
         run: |
           terraform plan \
             -out=tfplan \
-            -var "image_uri=${{ steps.ecr.outputs.processor_image }}"
+            -var "image_uri=${{ steps.processor_image.outputs.final_image }}"
 
       - name: Terraform apply
         if: github.ref == 'refs/heads/main'
@@ -185,7 +245,10 @@ jobs:
 
       - name: Deploy dashboard to S3
         if: github.ref == 'refs/heads/main'
-        run: aws s3 sync dashboard-dist "s3://${{ steps.dashboard.outputs.bucket }}/" --delete
+        run: |
+          aws s3 sync dashboard-dist "s3://${{ steps.dashboard.outputs.bucket }}/" \
+            --delete \
+            --cache-control "no-cache, no-store, must-revalidate"
 
       - name: Bootstrap dashboard admin
         if: github.ref == 'refs/heads/main' && env.BOOTSTRAP_EMAIL != ''

@@ -6,6 +6,22 @@ locals {
   function_name  = format("%s-api", var.project)
   log_group_name = format("/aws/lambda/%s-api", var.project)
   api_name       = format("%s-api", var.project)
+
+  cors_preflight_route_keys = toset([
+    "OPTIONS /{proxy+}",
+    "OPTIONS /dashboard/me",
+    "OPTIONS /dashboard/me/password",
+    "OPTIONS /dashboard/invites",
+    "OPTIONS /dashboard/invites/{id}",
+    "OPTIONS /filters",
+    "OPTIONS /health",
+    "OPTIONS /stats",
+    "OPTIONS /stats/timeseries",
+    "OPTIONS /transactions",
+    "OPTIONS /transactions/{id}",
+    "OPTIONS /users",
+    "OPTIONS /users/{id}",
+  ])
 }
 
 resource "aws_cloudwatch_log_group" "api_lambda" {
@@ -248,8 +264,10 @@ resource "aws_apigatewayv2_route" "delete_dashboard_invite" {
 }
 
 resource "aws_apigatewayv2_route" "cors_preflight" {
+  for_each = local.cors_preflight_route_keys
+
   api_id             = aws_apigatewayv2_api.main.id
-  route_key          = "OPTIONS /{proxy+}"
+  route_key          = each.value
   authorization_type = "NONE"
 }
 

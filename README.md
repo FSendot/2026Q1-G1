@@ -426,7 +426,7 @@ El repositorio tiene tres pipelines de GitHub Actions:
 |----------|---------|----------|
 | **Validate** | Todo push y PR | `terraform fmt -check` + `terraform validate` |
 | **Plan** | Push a `main` y PRs contra `main` | `terraform plan` y postea el diff como comentario en el PR |
-| **Docker** | Cambios en `app/` o PR/push a `main` | Build del procesador Go, push a ECR, `terraform apply` con el nuevo `image_uri`, deploy del dashboard a S3 |
+| **Docker** | Cambios en `app/`, `modules/`, `scripts/`, `templates/` o PR/push a `main` | Valida builds, reutiliza una imagen de procesador existente si el hash de fuentes ya está en ECR, crea/pushea imagen cuando el registry está vacío o cambió el procesador, ejecuta `terraform apply` y despliega el dashboard a S3 |
 
 Los secrets necesarios en GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`.
 

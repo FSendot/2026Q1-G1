@@ -6,7 +6,8 @@ locals {
     Component = "dashboard"
   })
 
-  bucket_name = format("%s-dashboard-%s", var.project, data.aws_caller_identity.current.account_id)
+  bucket_name         = format("%s-dashboard-%s", var.project, data.aws_caller_identity.current.account_id)
+  static_cache_policy = "no-cache, no-store, must-revalidate"
 }
 
 resource "aws_s3_bucket" "dashboard" {
@@ -59,21 +60,23 @@ resource "aws_s3_bucket_policy" "dashboard" {
 }
 
 resource "aws_s3_object" "index_html" {
-  bucket       = aws_s3_bucket.dashboard.id
-  key          = "index.html"
-  source       = "${path.root}/app/dashboard/index.html"
-  source_hash  = filemd5("${path.root}/app/dashboard/index.html")
-  content_type = "text/html"
+  bucket        = aws_s3_bucket.dashboard.id
+  key           = "index.html"
+  source        = "${path.root}/app/dashboard/index.html"
+  source_hash   = filemd5("${path.root}/app/dashboard/index.html")
+  content_type  = "text/html"
+  cache_control = local.static_cache_policy
 
   tags = local.module_tags
 }
 
 resource "aws_s3_object" "app_js" {
-  bucket       = aws_s3_bucket.dashboard.id
-  key          = "app.js"
-  source       = "${path.root}/app/dashboard/app.js"
-  source_hash  = filemd5("${path.root}/app/dashboard/app.js")
-  content_type = "application/javascript"
+  bucket        = aws_s3_bucket.dashboard.id
+  key           = "app.js"
+  source        = "${path.root}/app/dashboard/app.js"
+  source_hash   = filemd5("${path.root}/app/dashboard/app.js")
+  content_type  = "application/javascript"
+  cache_control = local.static_cache_policy
 
   tags = local.module_tags
 }
@@ -91,7 +94,8 @@ resource "aws_s3_object" "config_js" {
     cognito_redirect_uri       = var.cognito_redirect_uri
     cognito_logout_uri         = var.cognito_logout_uri
   })
-  content_type = "application/javascript"
+  content_type  = "application/javascript"
+  cache_control = local.static_cache_policy
 
   tags = local.module_tags
 }

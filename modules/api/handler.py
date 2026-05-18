@@ -16,6 +16,9 @@ logger.setLevel(logging.INFO)
 HEADERS = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "authorization,content-type,x-cognito-access-token",
+    "Access-Control-Allow-Methods": "DELETE,GET,OPTIONS,POST,PUT",
+    "Access-Control-Max-Age": "300",
 }
 
 _conn = None
@@ -107,6 +110,10 @@ def _err(status, code, message):
         "headers": HEADERS,
         "body": json.dumps({"error": {"code": code, "message": message}}),
     }
+
+
+def _preflight():
+    return {"statusCode": 204, "headers": HEADERS, "body": ""}
 
 
 def _headers(event):
@@ -920,6 +927,9 @@ def handler(event, context):
     logger.info(json.dumps({"action": "api_request", "path": path, "query": query}))
 
     try:
+        if method == "OPTIONS":
+            return _preflight()
+
         if path == "/health":
             return _health()
 

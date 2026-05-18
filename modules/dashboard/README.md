@@ -8,7 +8,7 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 - `aws_s3_bucket_website_configuration.dashboard` — static website hosting with `index.html`.
 - `aws_s3_bucket_public_access_block.dashboard` — public access block relaxed for the public website endpoint.
 - `aws_s3_bucket_policy.dashboard` — allows public `s3:GetObject` on website objects.
-- `aws_s3_object.index_html`, `aws_s3_object.app_js`, `aws_s3_object.config_js` — bootstrap dashboard objects. Their content is ignored after creation so CI can publish the built frontend without causing Terraform artifact drift.
+- `aws_s3_object.index_html`, `aws_s3_object.app_js`, `aws_s3_object.config_js` — bootstrap dashboard objects. These stable filenames are published with `no-cache, no-store, must-revalidate` so browsers do not keep stale Cognito/API settings after a redeploy.
 
 ## Inputs
 
@@ -51,5 +51,7 @@ docker build \
   --output type=local,dest=dashboard-dist \
   app
 
-aws s3 sync dashboard-dist "s3://$(terraform output -raw dashboard_bucket_name)/" --delete
+aws s3 sync dashboard-dist "s3://$(terraform output -raw dashboard_bucket_name)/" \
+  --delete \
+  --cache-control "no-cache, no-store, must-revalidate"
 ```
