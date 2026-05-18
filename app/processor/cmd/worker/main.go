@@ -7,6 +7,8 @@ import (
 	"log"
 	"math"
 	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	fraudruntime "github.com/FSendot/fraud-detector/net/serving/go/pkg/fraudruntime"
@@ -60,6 +62,17 @@ type AuditEvent struct {
 	Transaction   Transaction   `json:"transaction"`
 	ScoringResult ScoringResult `json:"scoring_result"`
 	ProcessedAt   string        `json:"processed_at"`
+}
+
+type userLockSet struct {
+	locks sync.Map
+}
+
+func (s *userLockSet) lock(userID string) func() {
+	value, _ := s.locks.LoadOrStore(userID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // scorer abstracts ML engine and rule-based fallback behind a single interface.
@@ -124,9 +137,11 @@ func main() {
 
 	queueURL := mustEnv("QUEUE_URL")
 	topicARN := mustEnv("SNS_TOPIC_ARN")
+	processorConcurrency := envInt("PROCESSOR_CONCURRENCY", 32, 1, 512)
+	processorPollers := envInt("PROCESSOR_POLLERS", 4, 1, 64)
 
-	log.Printf("worker started — queue=%s topic=%s", queueURL, topicARN)
-	runLoop(ctx, sqsClient, snsClient, dynamoClient, s3Client, engine, queueURL, topicARN)
+	log.Printf("worker started — queue=%s topic=%s concurrency=%d pollers=%d", queueURL, topicARN, processorConcurrency, processorPollers)
+	runLoop(ctx, sqsClient, snsClient, dynamoClient, s3Client, engine, queueURL, topicARN, processorConcurrency, processorPollers)
 }
 
 // resolveScorer loads the ML engine when runtime_spec.json is available,
@@ -156,27 +171,46 @@ func runLoop(
 	s3Client *store.S3Client,
 	engine scorer,
 	queueURL, topicARN string,
+	processorConcurrency, processorPollers int,
 ) {
-	for {
-		out, err := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-			QueueUrl:            aws.String(queueURL),
-			MaxNumberOfMessages: 10,
-			WaitTimeSeconds:     20,
-		})
-		if err != nil {
-			log.Printf("sqs receive error: %v", err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
+	jobs := make(chan sqstypes.Message, processorConcurrency*10)
+	userLocks := &userLockSet{}
 
-		for _, msg := range out.Messages {
-			if err := processMessage(ctx, msg, sqsClient, snsClient, dynamoClient, s3Client, engine, queueURL, topicARN); err != nil {
-				log.Printf("processing error receipt=%s: %v", aws.ToString(msg.ReceiptHandle), err)
-				// Do not delete — visibility timeout expires and the message retries.
-				// After maxReceiveCount it lands in the DLQ.
+	var workers sync.WaitGroup
+	for workerID := range processorConcurrency {
+		workers.Go(func() {
+			for msg := range jobs {
+				if err := processMessage(ctx, msg, sqsClient, snsClient, dynamoClient, s3Client, engine, userLocks, queueURL, topicARN); err != nil {
+					log.Printf("processing error worker=%d receipt=%s: %v", workerID, aws.ToString(msg.ReceiptHandle), err)
+					// Do not delete — visibility timeout expires and the message retries.
+					// After maxReceiveCount it lands in the DLQ.
+				}
 			}
-		}
+		})
 	}
+
+	for pollerID := range processorPollers {
+		go func(pollerID int) {
+			for {
+				out, err := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+					QueueUrl:            aws.String(queueURL),
+					MaxNumberOfMessages: 10,
+					WaitTimeSeconds:     20,
+				})
+				if err != nil {
+					log.Printf("sqs receive error poller=%d: %v", pollerID, err)
+					time.Sleep(5 * time.Second)
+					continue
+				}
+
+				for _, msg := range out.Messages {
+					jobs <- msg
+				}
+			}
+		}(pollerID)
+	}
+
+	workers.Wait()
 }
 
 func processMessage(
@@ -187,6 +221,7 @@ func processMessage(
 	dynamoClient *dynamo.Client,
 	s3Client *store.S3Client,
 	engine scorer,
+	userLocks *userLockSet,
 	queueURL, topicARN string,
 ) error {
 	var tx Transaction
@@ -202,6 +237,9 @@ func processMessage(
 		return nil
 	}
 
+	unlockUser := userLocks.lock(tx.UserID)
+	defer unlockUser()
+
 	profile, err := dynamoClient.GetProfile(ctx, tx.UserID)
 	if err != nil {
 		return fmt.Errorf("dynamo GetProfile user=%s: %w", tx.UserID, err)
@@ -213,7 +251,7 @@ func processMessage(
 	if err := dynamoClient.UpdateProfile(
 		ctx, profile, tx.Amount, tx.Country, tx.Channel, tx.DestinationAccount, tx.Timestamp,
 	); err != nil {
-		log.Printf("dynamo UpdateProfile user=%s: %v", tx.UserID, err)
+		return fmt.Errorf("dynamo UpdateProfile user=%s: %w", tx.UserID, err)
 	}
 
 	result := ScoringResult{
@@ -344,6 +382,24 @@ func mustEnv(key string) string {
 		log.Fatalf("required environment variable %s is not set", key)
 	}
 	return v
+}
+
+func envInt(key string, defaultValue, minValue, maxValue int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Fatalf("environment variable %s must be an integer, got %q", key, raw)
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 func signedLog1p(x float64) float64 {

@@ -92,6 +92,9 @@ module "compute" {
   min_capacity  = var.min_capacity
   max_capacity  = var.max_capacity
 
+  processor_concurrency = var.processor_concurrency
+  processor_pollers     = var.processor_pollers
+
   queue_arn         = module.queue.queue_arn
   queue_url         = module.queue.queue_url
   queue_name        = module.queue.queue_name

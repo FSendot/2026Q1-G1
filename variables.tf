@@ -59,6 +59,28 @@ variable "max_capacity" {
   }
 }
 
+variable "processor_concurrency" {
+  description = "Cantidad de workers concurrentes por task de Fargate para procesar mensajes SQS."
+  type        = number
+  default     = 32
+
+  validation {
+    condition     = var.processor_concurrency >= 1 && var.processor_concurrency <= 512
+    error_message = "processor_concurrency debe estar entre 1 y 512."
+  }
+}
+
+variable "processor_pollers" {
+  description = "Cantidad de long-pollers SQS concurrentes por task de Fargate."
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.processor_pollers >= 1 && var.processor_pollers <= 64
+    error_message = "processor_pollers debe estar entre 1 y 64."
+  }
+}
+
 variable "enable_onprem_sim" {
   description = "Habilita la VPC simulada de on-premise con su EC2 strongSwan, Customer Gateway, conexión Site-to-Site VPN contra el VGW, la Private Hosted Zone para SQS y el lockdown de la cola al CIDR on-premise."
   type        = bool

@@ -31,6 +31,8 @@ locals {
         { name = "DYNAMODB_TABLE_NAME", value = var.table_name },
         { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
         { name = "S3_AUDIT_BUCKET", value = var.audit_bucket_name },
+        { name = "PROCESSOR_CONCURRENCY", value = tostring(var.processor_concurrency) },
+        { name = "PROCESSOR_POLLERS", value = tostring(var.processor_pollers) },
       ]
 
       logConfiguration = {

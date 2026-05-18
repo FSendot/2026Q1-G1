@@ -7,7 +7,7 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 - `aws_ecr_repository.app` — `<project>/fraud-engine`. Image tag mutability `MUTABLE`, scan-on-push enabled, AES256 encryption (KMS-CMK skipped — AWS Academy).
 - `aws_cloudwatch_log_group.app` — `/ecs/<project>-fraud-engine`. Retention configurable via `log_retention_days`.
 - `aws_ecs_cluster.main` — `<project>-cluster`, `containerInsights = enabled`.
-- `aws_ecs_task_definition.app` — Fargate, awsvpc, X86_64/Linux. Both `task_role_arn` and `execution_role_arn` are passed in (LabRole in the lab). The container runs with `readonlyRootFilesystem = true`, `privileged = false`, and gets `AWS_REGION`, `QUEUE_URL`, `QUEUE_NAME`, `DYNAMODB_TABLE_NAME`, and `SNS_TOPIC_ARN` as env vars.
+- `aws_ecs_task_definition.app` — Fargate, awsvpc, X86_64/Linux. Both `task_role_arn` and `execution_role_arn` are passed in (LabRole in the lab). The container runs with `readonlyRootFilesystem = true`, `privileged = false`, and gets `AWS_REGION`, `QUEUE_URL`, `QUEUE_NAME`, `DYNAMODB_TABLE_NAME`, `SNS_TOPIC_ARN`, `PROCESSOR_CONCURRENCY`, and `PROCESSOR_POLLERS` as env vars.
 - `aws_ecs_service.app` — runs `desired_count` tasks across `private_subnet_ids`, `assign_public_ip = false`, attached to the dedicated task SG. `lifecycle { ignore_changes = [desired_count] }` so Application Auto Scaling owns the running count.
 - `aws_security_group.task` — ingress empty, egress only to the endpoint SG on tcp/443.
 - `aws_appautoscaling_target.ecs` — Application Auto Scaling target on `ecs:service:DesiredCount`.
@@ -31,6 +31,8 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 | `desired_count`                   | `number`       | `2`     | Initial task count.                                                      |
 | `min_capacity`                    | `number`       | `1`     | Auto Scaling lower bound.                                                |
 | `max_capacity`                    | `number`       | `10`    | Auto Scaling upper bound.                                                |
+| `processor_concurrency`           | `number`       | `32`    | Concurrent message-processing workers per task.                          |
+| `processor_pollers`               | `number`       | `4`     | Concurrent SQS long-pollers per task.                                    |
 | `queue_arn`                       | `string`       | n/a     | SQS queue ARN.                                                           |
 | `queue_url`                       | `string`       | n/a     | SQS queue URL (env var).                                                 |
 | `queue_name`                      | `string`       | n/a     | SQS queue name (used in CloudWatch metric dimensions).                   |

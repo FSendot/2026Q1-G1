@@ -1,6 +1,6 @@
 module github.com/FSendot/fraud-detector/processor
 
-go 1.24
+go 1.26
 
 require (
 	github.com/FSendot/fraud-detector/net/serving/go v0.0.0

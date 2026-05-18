@@ -105,6 +105,28 @@ variable "max_capacity" {
   }
 }
 
+variable "processor_concurrency" {
+  description = "Cantidad de workers concurrentes por task para procesar mensajes SQS."
+  type        = number
+  default     = 32
+
+  validation {
+    condition     = var.processor_concurrency >= 1 && var.processor_concurrency <= 512
+    error_message = "processor_concurrency debe estar entre 1 y 512."
+  }
+}
+
+variable "processor_pollers" {
+  description = "Cantidad de pollers SQS concurrentes por task."
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.processor_pollers >= 1 && var.processor_pollers <= 64
+    error_message = "processor_pollers debe estar entre 1 y 64."
+  }
+}
+
 variable "queue_arn" {
   description = "ARN de la cola SQS principal; usado por el target tracking del autoscaling."
   type        = string
