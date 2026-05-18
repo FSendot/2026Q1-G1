@@ -56,6 +56,9 @@ def build_ec2_script(queue_url: str, region: str, count: int, fraud_pct: int, co
         export COUNT="$count"
         export FRAUD_PCT="$fraud_pct"
         export CONCURRENCY="$concurrency"
+        export HOME="$${HOME:-/tmp}"
+        export GOCACHE="$${GOCACHE:-/tmp/go-build-cache}"
+        mkdir -p "$$GOCACHE"
 
         if ! command -v go >/dev/null 2>&1; then
             if command -v dnf >/dev/null 2>&1; then
