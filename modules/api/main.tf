@@ -247,6 +247,12 @@ resource "aws_apigatewayv2_route" "delete_dashboard_invite" {
   authorization_type = "JWT"
 }
 
+resource "aws_apigatewayv2_route" "cors_preflight" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "OPTIONS /{proxy+}"
+  authorization_type = "NONE"
+}
+
 resource "aws_apigatewayv2_route" "default" {
   api_id             = aws_apigatewayv2_api.main.id
   route_key          = "$default"
