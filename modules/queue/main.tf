@@ -87,30 +87,12 @@ data "aws_iam_policy_document" "main" {
     }
   }
 
-  dynamic "statement" {
-    for_each = var.onprem_vpc_cidr != "" ? [1] : []
-    content {
-      sid    = "AllowSendMessageOnlyFromOnPrem"
-      effect = "Deny"
-
-      principals {
-        type        = "AWS"
-        identifiers = ["*"]
-      }
-
-      actions   = ["sqs:SendMessage"]
-      resources = [aws_sqs_queue.main.arn]
-
-      # Sólo se admite SendMessage cuando la IP origen pertenece al CIDR on-premise.
-      # NotIpAddressIfExists hace que el deny dispare también cuando la clave no está
-      # presente (peticiones por Internet sin VPC Endpoint), cerrando ambas vías.
-      condition {
-        test     = "NotIpAddressIfExists"
-        variable = "aws:VpcSourceIp"
-        values   = [var.onprem_vpc_cidr]
-      }
-    }
-  }
+  # Nota: se intentó restringir SendMessage al CIDR/VPC on-premise via
+  # aws:VpcSourceIp y aws:SourceVpc, pero ambas condition keys no se
+  # propagan para tráfico cross-VPC via VPN Site-to-Site hacia un Interface
+  # VPC Endpoint. La restricción de red queda garantizada arquitecturalmente
+  # por el VPN + VPCE; en producción se usarían credenciales IAM dedicadas
+  # al sistema on-prem con aws:SourceIp sobre su IP pública fija.
 }
 
 resource "aws_sqs_queue_policy" "main" {

@@ -24,19 +24,23 @@ import (
 // Transaction is the JSON payload expected from the SQS queue.
 // Balance fields are optional: when absent the ML engine applies its
 // MissingGoToLeft strategy for those tree splits.
+// Features allows callers to supply pre-computed ML features (e.g. card/addr/velocity
+// signals). Values override NaN defaults for known feature-contract names; unknown
+// names are silently ignored.
 type Transaction struct {
-	TransactionID      string   `json:"transaction_id"`
-	UserID             string   `json:"user_id"`
-	Amount             float64  `json:"amount"`
-	Currency           string   `json:"currency"`
-	Timestamp          string   `json:"timestamp"`
-	Channel            string   `json:"channel"`
-	DestinationAccount string   `json:"destination_account"`
-	Country            string   `json:"country"`
-	OldBalanceOrg      *float64 `json:"oldbalance_org,omitempty"`
-	NewBalanceOrig     *float64 `json:"newbalance_orig,omitempty"`
-	OldBalanceDest     *float64 `json:"oldbalance_dest,omitempty"`
-	NewBalanceDest     *float64 `json:"newbalance_dest,omitempty"`
+	TransactionID      string             `json:"transaction_id"`
+	UserID             string             `json:"user_id"`
+	Amount             float64            `json:"amount"`
+	Currency           string             `json:"currency"`
+	Timestamp          string             `json:"timestamp"`
+	Channel            string             `json:"channel"`
+	DestinationAccount string             `json:"destination_account"`
+	Country            string             `json:"country"`
+	OldBalanceOrg      *float64           `json:"oldbalance_org,omitempty"`
+	NewBalanceOrig     *float64           `json:"newbalance_orig,omitempty"`
+	OldBalanceDest     *float64           `json:"oldbalance_dest,omitempty"`
+	NewBalanceDest     *float64           `json:"newbalance_dest,omitempty"`
+	Features           map[string]float64 `json:"features,omitempty"`
 }
 
 // ScoringResult is published to SNS after scoring.
@@ -314,6 +318,12 @@ func buildMLFeatures(tx Transaction, featureOrder []string) map[string]float64 {
 		delta := *tx.NewBalanceDest - *tx.OldBalanceDest
 		features["balance_delta_dest"] = delta
 		features["balance_delta_dest_log1p"] = signedLog1p(delta)
+	}
+
+	for k, v := range tx.Features {
+		if _, inContract := features[k]; inContract {
+			features[k] = v
+		}
 	}
 
 	return features
