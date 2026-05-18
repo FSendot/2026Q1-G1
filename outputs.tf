@@ -135,7 +135,12 @@ output "proxy_endpoint" {
 }
 
 output "dashboard_url" {
-  description = "URL HTTP del dashboard (S3 static website endpoint). Para Cognito usar dashboard_app_url."
+  description = "URL HTTPS recomendada para abrir el dashboard con Cognito."
+  value       = local.dashboard_app_url
+}
+
+output "dashboard_website_url" {
+  description = "URL HTTP del endpoint S3 static website. No usar como entrada de Cognito/PKCE."
   value       = module.dashboard.website_url
 }
 

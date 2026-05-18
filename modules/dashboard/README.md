@@ -29,8 +29,8 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 
 | Name          | Description                                      |
 | ------------- | ------------------------------------------------ |
-| `website_url` | S3 website endpoint URL for the dashboard.       |
-| `https_index_url` | HTTPS S3 object URL for `index.html`, used by Cognito callback/logout. |
+| `website_url` | HTTP S3 website endpoint URL. Do not use it as the Cognito login entrypoint. |
+| `https_index_url` | HTTPS S3 object URL for `index.html`, used by Cognito callback/logout and browser PKCE. |
 | `bucket_name` | Bucket name where CI syncs the frontend export.  |
 
 ## Deployment

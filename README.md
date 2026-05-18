@@ -281,7 +281,8 @@ Outputs relevantes:
 
 | Output | Descripción |
 |--------|-------------|
-| `dashboard_url` | URL del dashboard web |
+| `dashboard_url` | URL HTTPS recomendada para abrir el dashboard con Cognito |
+| `dashboard_website_url` | Endpoint HTTP de S3 website; no usar como entrada de Cognito |
 | `api_endpoint` | URL base de la API REST |
 | `queue_url` | URL de la cola SQS de ingesta (on-prem envía aquí) |
 | `sns_topic_arn` | ARN del topic SNS de resultados |
@@ -326,9 +327,7 @@ Muestra los logs de Fargate en tiempo real con `fraud_score` e `is_fraud` por tr
 terraform output -raw dashboard_url
 ```
 
-Abrir esa URL en el browser. Ingresar con:
-
-El dashboard usa Cognito Hosted UI. El primer acceso requiere crear el bootstrap admin con `make bootstrap-auth` (ver sección Dashboard Auth).
+Abrir esa URL en el browser e ingresar con Cognito Hosted UI. El primer acceso requiere crear el bootstrap admin con `make bootstrap-auth` (ver sección Dashboard Auth).
 
 ---
 
@@ -340,13 +339,13 @@ El dashboard es un sitio web estático en S3 que consulta la API REST en tiempo 
 terraform output -raw dashboard_url
 ```
 
-La URL anterior es el endpoint website HTTP de S3. Para el flujo Cognito se registra también el objeto HTTPS:
+La URL anterior es el objeto HTTPS `index.html` y es la entrada correcta para Cognito Hosted UI. El endpoint HTTP de S3 website existe como salida separada, pero no sirve como entrada de login porque PKCE necesita un contexto seguro del navegador.
 
 ```bash
-terraform output -raw dashboard_app_url
+terraform output -raw dashboard_website_url
 ```
 
-Abrí `dashboard_app_url` para login con Cognito Hosted UI.
+Si necesitás la salida histórica usada por el build, `dashboard_app_url` apunta al mismo objeto HTTPS que `dashboard_url`.
 
 ### Dashboard Auth
 

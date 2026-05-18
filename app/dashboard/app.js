@@ -151,12 +151,15 @@
 
   function randomUrlSafeString(byteLength = 64) {
     const bytes = new Uint8Array(byteLength);
-    crypto.getRandomValues(bytes);
+    globalThis.crypto.getRandomValues(bytes);
     return base64UrlFromBytes(bytes);
   }
 
   async function sha256UrlSafe(value) {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    if (!hasPkceCrypto()) {
+      throw new Error("Esta URL no permite iniciar sesión con Cognito. Abrí el dashboard desde la URL HTTPS.");
+    }
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
     return base64UrlFromBytes(new Uint8Array(digest));
   }
 
@@ -182,6 +185,41 @@
   function currentRedirectUri() {
     const explicit = textOrEmpty(window.COGNITO_REDIRECT_URI || window.DASHBOARD_REDIRECT_URI);
     return explicit || nowlessUrl();
+  }
+
+  function hasPkceCrypto() {
+    const webCrypto = globalThis.crypto;
+    return Boolean(
+      webCrypto?.getRandomValues &&
+      webCrypto?.subtle?.digest &&
+      typeof TextEncoder === "function"
+    );
+  }
+
+  function configuredSecureRedirectUri() {
+    const redirectUri = textOrEmpty(authState.config?.redirectUri);
+    if (!redirectUri) return "";
+    try {
+      const target = new URL(redirectUri);
+      if (target.protocol !== "https:") return "";
+      if (target.href === nowlessUrl()) return "";
+      return target.href;
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function ensureCognitoSecureContext() {
+    if (!useCognito()) return true;
+    const target = configuredSecureRedirectUri();
+    if (target) {
+      showLoadingScreen("Redirigiendo al dashboard HTTPS…");
+      window.location.replace(target);
+      return false;
+    }
+    if (hasPkceCrypto()) return true;
+    showLoginScreen("Esta URL no permite iniciar sesión con Cognito. Abrí el dashboard desde la URL HTTPS.");
+    return false;
   }
 
   function resolveCognitoConfig() {
@@ -590,6 +628,7 @@
       showLoginScreen("La configuración de Cognito no está disponible.");
       return;
     }
+    if (!ensureCognitoSecureContext()) return;
     const verifier = randomUrlSafeString(64);
     const state = randomUrlSafeString(16);
     storageSetJson(PKCE_KEY, { verifier, state, created_at: Date.now() });
@@ -1244,6 +1283,7 @@
   function init() {
     authState.config = resolveCognitoConfig();
     authState.mode = useCognito() ? "cognito" : "local";
+    if (useCognito() && !ensureCognitoSecureContext()) return;
     setLoginMode(useCognito() ? "cognito" : "local");
 
     // Login
