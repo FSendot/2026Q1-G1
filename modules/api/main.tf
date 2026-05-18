@@ -271,6 +271,11 @@ resource "aws_apigatewayv2_route" "cors_preflight" {
   authorization_type = "NONE"
 }
 
+moved {
+  from = aws_apigatewayv2_route.cors_preflight
+  to   = aws_apigatewayv2_route.cors_preflight["OPTIONS /{proxy+}"]
+}
+
 resource "aws_apigatewayv2_route" "default" {
   api_id             = aws_apigatewayv2_api.main.id
   route_key          = "$default"
