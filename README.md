@@ -301,17 +301,33 @@ El flujo completo envía transacciones desde el on-prem simulado (EC2 strongSwan
 make send-test-tx
 ```
 
-Por default envía 50 transacciones con 20% de fraude. Se puede ajustar:
+Por default envía 50.000 transacciones con 20% de fraude. Se puede ajustar:
 
 ```bash
-make send-test-tx TX_COUNT=100 FRAUD_PCT=30
+make send-test-tx TX_COUNT=10000 FRAUD_PCT=30
 ```
 
-El script obtiene automáticamente el instance ID del EC2 on-prem desde CloudFormation y la queue URL desde el output de Terraform, construye un script bash y lo ejecuta en el EC2 vía SSM (`AWS-RunShellScript`). El tráfico SQS viaja por el túnel VPN hacia el Interface VPC Endpoint, sin salir a internet.
+Para ejecutarlo localmente hace falta tener credenciales AWS activas, Terraform inicializado y `boto3` instalado en el Python que usa `make`:
 
-Cada transacción incluye features de ML pre-computados (card/addr/velocity/identity signals) para que el modelo pueda diferenciar fraude de transacciones legítimas:
-- **Normal**: misma cuenta/país, dispositivo estable, 8+ horas entre transacciones → ~9% fraud score → Permitida
-- **Fraude**: country shift, destination shift, device/identity shift, 18 segundos entre transacciones, v-features altos → ~26% fraud score → Bloqueada
+```bash
+python3 -m pip install boto3
+make init
+make send-test-tx
+```
+
+El script obtiene automáticamente el instance ID del EC2 on-prem desde CloudFormation y la queue URL desde el output de Terraform, construye un script Python/batch y lo ejecuta en el EC2 vía SSM (`AWS-RunShellScript`). El tráfico SQS viaja por el túnel VPN hacia el Interface VPC Endpoint, sin salir a internet. En el EC2 se usa la AWS CLI con `send-message-batch` para mandar hasta 10 mensajes por request a SQS.
+
+Cada transacción incluye features de ML pre-computados y aleatorizados (card/addr/velocity/identity signals) para que el modelo pueda diferenciar fraude de transacciones legítimas:
+- **Normal**: usuarios recurrentes y nuevos, importes bajos/medios, beneficiarios conocidos, dispositivo estable y gaps de horas o días.
+- **Fraude**: account drain, country shift, device/identity shift, merchant fanout y micro-transacciones tipo card testing, con gaps de segundos/minutos y mayor diversidad de destino.
+
+También existe una GitHub Action manual, **Send test transactions**, para generar tráfico sin depender del Python local. No corre en `push`; se ejecuta desde la pestaña Actions con `Run workflow`. Requiere configurar estos secrets del repo con las credenciales temporales del lab:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN`
+
+La Action permite ajustar `count`, `fraud_pct`, `region`, `stack`, y opcionalmente pasar `queue_url` o `instance_id` para evitar leerlos desde Terraform/CloudFormation.
 
 ### Paso 2 — Ver los logs en tiempo real
 

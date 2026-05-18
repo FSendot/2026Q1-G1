@@ -12,7 +12,7 @@ LOG_GROUP     ?= /ecs/itba-tp-fraud-fraud-engine
 REGION        ?= us-east-1
 COUNT         ?= 1000
 DAYS          ?= 30
-TX_COUNT      ?= 50
+TX_COUNT      ?= 50000
 FRAUD_PCT     ?= 20
 PYTHON        ?= $(shell which python3)
 GOOGLE_OAUTH_CLIENT_ID     ?=
@@ -38,7 +38,7 @@ help:
 	@echo "  make clean            Remove .terraform/ and tfplan files"
 	@echo "  make seed             Seed RDS with ~COUNT mock transactions (default COUNT=1000, DAYS=30)"
 	@echo "  make bootstrap-auth   Bootstrap dashboard admin access with BOOTSTRAP_EMAIL"
-	@echo "  make send-test-tx     Send TX_COUNT real transactions via on-prem EC2 → VPN → SQS (default TX_COUNT=5, FRAUD_PCT=20)"
+	@echo "  make send-test-tx     Send TX_COUNT real transactions via on-prem EC2 → VPN → SQS (default TX_COUNT=50000, FRAUD_PCT=20)"
 	@echo "  make logs             Tail Fargate worker logs in real time (Ctrl+C to stop)"
 
 fmt:
