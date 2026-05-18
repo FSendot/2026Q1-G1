@@ -1,5 +1,3 @@
-data "aws_region" "current" {}
-
 locals {
   module_tags = merge(var.tags, {
     Component = "api"
@@ -70,11 +68,12 @@ resource "aws_lambda_function" "api" {
 
   environment {
     variables = {
-      DB_HOST     = var.db_host
-      DB_PORT     = tostring(var.db_port)
-      DB_NAME     = var.db_name
-      DB_USER     = var.db_username
-      DB_PASSWORD = var.db_password
+      DB_HOST           = var.db_host
+      DB_PORT           = tostring(var.db_port)
+      DB_NAME           = var.db_name
+      DB_USER           = var.db_username
+      DB_PASSWORD       = var.db_password
+      AUTH_LOCAL_BYPASS = "false"
     }
   }
 
@@ -93,14 +92,26 @@ resource "aws_apigatewayv2_api" "main" {
 
   cors_configuration {
     allow_origins = ["*"]
-    allow_methods = ["GET", "OPTIONS"]
-    allow_headers = ["Content-Type", "Authorization"]
+    allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers = ["Content-Type", "Authorization", "X-Cognito-Access-Token"]
     max_age       = 300
   }
 
   tags = merge(local.module_tags, {
     Name = local.api_name
   })
+}
+
+resource "aws_apigatewayv2_authorizer" "jwt" {
+  api_id           = aws_apigatewayv2_api.main.id
+  authorizer_type  = "JWT"
+  name             = format("%s-jwt-authorizer", var.project)
+  identity_sources = ["$request.header.Authorization"]
+
+  jwt_configuration {
+    audience = [var.jwt_audience]
+    issuer   = var.jwt_issuer
+  }
 }
 
 resource "aws_cloudwatch_log_group" "api_gw" {
@@ -133,57 +144,115 @@ resource "aws_apigatewayv2_integration" "lambda" {
 }
 
 resource "aws_apigatewayv2_route" "get_transactions" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /transactions"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /transactions"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "get_stats" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /stats"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /stats"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "get_health" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /health"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /health"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "get_stats_timeseries" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /stats/timeseries"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /stats/timeseries"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "get_filters" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /filters"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /filters"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "get_transaction_by_id" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /transactions/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /transactions/{id}"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "get_users" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /users"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /users"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "get_user_by_id" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /users/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /users/{id}"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
+}
+
+resource "aws_apigatewayv2_route" "get_dashboard_me" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /dashboard/me"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
+}
+
+resource "aws_apigatewayv2_route" "put_dashboard_password" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "PUT /dashboard/me/password"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
+}
+
+resource "aws_apigatewayv2_route" "get_dashboard_invites" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /dashboard/invites"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
+}
+
+resource "aws_apigatewayv2_route" "post_dashboard_invites" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "POST /dashboard/invites"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
+}
+
+resource "aws_apigatewayv2_route" "delete_dashboard_invite" {
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "DELETE /dashboard/invites/{id}"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_apigatewayv2_route" "default" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "$default"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "$default"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  authorization_type = "JWT"
 }
 
 resource "aws_lambda_permission" "api_gw" {

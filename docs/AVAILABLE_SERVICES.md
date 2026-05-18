@@ -37,6 +37,9 @@ This service can assume the LabRole IAM role.
 You can create a CloudTrail, but you cannot enable CloudWatch logging for the trail.
 
 ## Amazon CloudWatch
+## Amazon Cognito
+User pools are available in the current lab account and can be used for dashboard authentication.
+
 ## AWS CodeCommit
 This service can assume the LabRole IAM role.
 

@@ -11,8 +11,13 @@ REGION        ?= us-east-1
 COUNT         ?= 1000
 DAYS          ?= 30
 PYTHON        ?= $(shell which python3)
+GOOGLE_OAUTH_CLIENT_ID     ?=
+GOOGLE_OAUTH_CLIENT_SECRET ?=
+BOOTSTRAP_EMAIL            ?=
+BOOTSTRAP_PASSWORD         ?=
+BOOTSTRAP_DISPLAY_NAME     ?= Bootstrap Admin
 
-.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep seed
+.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep seed bootstrap-auth
 
 help:
 	@echo "Targets:"
@@ -28,6 +33,7 @@ help:
 	@echo "  make destroy       Destroy all managed infrastructure"
 	@echo "  make clean         Remove .terraform/ and tfplan files"
 	@echo "  make seed          Seed RDS with ~COUNT mock transactions (default COUNT=1000, DAYS=30)"
+	@echo "  make bootstrap-auth Bootstrap dashboard admin access with BOOTSTRAP_EMAIL"
 
 fmt:
 	terraform fmt -recursive
@@ -71,6 +77,8 @@ init:
 	terraform init -migrate-state -force-copy -backend-config="bucket=$${BUCKET}"
 
 plan: $(PSYCOPG2_ZIP)
+	TF_VAR_google_oauth_client_id="$(GOOGLE_OAUTH_CLIENT_ID)" \
+	TF_VAR_google_oauth_client_secret="$(GOOGLE_OAUTH_CLIENT_SECRET)" \
 	terraform plan -out=tfplan
 
 apply:
@@ -102,3 +110,14 @@ seed:
 	  --region $(REGION) \
 	  --count $(COUNT) \
 	  --days $(DAYS)
+
+bootstrap-auth:
+	@if [ -z "$(BOOTSTRAP_EMAIL)" ]; then \
+	  echo "BOOTSTRAP_EMAIL is required, e.g. make bootstrap-auth BOOTSTRAP_EMAIL=you@example.com"; \
+	  exit 1; \
+	fi
+	$(PYTHON) scripts/bootstrap_auth.py \
+	  --email "$(BOOTSTRAP_EMAIL)" \
+	  --password "$(BOOTSTRAP_PASSWORD)" \
+	  --display-name "$(BOOTSTRAP_DISPLAY_NAME)" \
+	  --region "$(REGION)"

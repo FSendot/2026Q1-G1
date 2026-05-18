@@ -82,7 +82,7 @@ Provisiona la VPC privada que aloja toda la infraestructura. No tiene NAT Gatewa
 **Recursos clave:**
 - [`module "vpc"`](modules/network/main.tf#L22) (`terraform-aws-modules/vpc/aws`): VPC `10.0.0.0/16` con 2 subnets privadas en distintas AZs; Virtual Private Gateway (VGW) para la VPN site-to-site vía [`enable_vpn_gateway`](modules/network/main.tf#L38)
 - **Gateway VPC Endpoints** (S3, DynamoDB): [`aws_vpc_endpoint.gateway`](modules/network/main.tf#L83)
-- **Interface VPC Endpoints** (SQS, ECR API, ECR DKR, CloudWatch Logs, SNS, Secrets Manager): [`aws_vpc_endpoint.interface`](modules/network/main.tf#L96)
+- **Interface VPC Endpoints** (SQS, ECR API, ECR DKR, CloudWatch Logs, SNS, Secrets Manager, Cognito IDP): [`aws_vpc_endpoint.interface`](modules/network/main.tf#L97)
 
 **Módulo externo**: el pin `~> 5.13` está en [`modules/network/main.tf`](modules/network/main.tf#L22); los VPC Endpoints propios son los recursos enlazados arriba.
 
@@ -145,12 +145,17 @@ La Lambda crea la tabla `transactions` si no existe (schema migration automátic
 
 ### `modules/api`
 
-API REST serverless que sirve los datos del dashboard.
+API REST serverless protegida por Cognito que sirve los datos del dashboard.
 
 **Endpoints:**
 | Método | Path | Descripción |
 |--------|------|-------------|
-| GET | `/health` | Health check con ping a RDS |
+| GET | `/health` | Health check con ping a RDS (requiere JWT Cognito) |
+| GET | `/dashboard/me` | Perfil del dashboard user autenticado; activa invitaciones pendientes si el email verificado coincide |
+| GET | `/dashboard/invites` | Lista de invitaciones/accesos del dashboard (solo bootstrap admin) |
+| POST | `/dashboard/invites` | Crea o reactiva una invitación por email (solo bootstrap admin) |
+| DELETE | `/dashboard/invites/{id}` | Soft-disable de un acceso de dashboard (solo bootstrap admin; no aplica al bootstrap admin) |
+| PUT | `/dashboard/me/password` | Cambio de contraseña para usuarios Cognito locales |
 | GET | `/stats` | Totales: transacciones, bloqueadas, permitidas, challenge |
 | GET | `/transactions?limit=N` | Últimas N transacciones (máx 100) |
 
@@ -180,6 +185,12 @@ Sitio web estático en S3 con el panel de operaciones. Muestra las últimas tran
 
 Los archivos `index.html` y `app.js` son subidos por el pipeline CI/CD mediante `aws s3 sync` después de cada build.
 
+### `modules/auth`
+
+Capa de autenticación del dashboard. Crea un Cognito User Pool con email como identidad de acceso, self-signup habilitado, Hosted UI, dominio administrado `itba-fraud-auth-<account-id>` y un app client público para flujo Authorization Code + PKCE. Google OAuth es opcional y sólo se habilita si se pasan `GOOGLE_OAUTH_CLIENT_ID` y `GOOGLE_OAUTH_CLIENT_SECRET` al plan/apply.
+
+La autorización final no vive sólo en Cognito: la Lambda API mantiene una tabla `dashboard_access` en RDS. Un usuario puede autenticarse correctamente en Cognito y aun así quedar bloqueado si su email verificado no fue pre-invitado por el bootstrap admin.
+
 ---
 
 ## Funciones y meta-argumentos de Terraform
@@ -206,7 +217,7 @@ Los archivos `index.html` y `app.js` son subidos por el pipeline CI/CD mediante 
 
 | Meta-argumento | Dónde | Para qué |
 |----------------|-------|----------|
-| `for_each` | `modules/network` — VPC Endpoints | Crear un endpoint por servicio (sqs, ecr_api, ecr_dkr, logs, sns, s3, dynamodb) desde un mapa/set, evitando duplicar bloques de recurso |
+| `for_each` | `modules/network` — VPC Endpoints | Crear un endpoint por servicio (sqs, ecr_api, ecr_dkr, logs, sns, secretsmanager, cognito_idp, s3, dynamodb) desde un mapa/set, evitando duplicar bloques de recurso |
 | `count` | `main.tf` — `module.onprem_sim` | Crear o no la simulación on-prem según `var.enable_onprem_sim`. Permite habilitar/deshabilitar toda la infraestructura VPN con un flag |
 | `lifecycle { ignore_changes }` | `modules/compute` — ECS Service | Ignora cambios en `desired_count` para que Application Auto Scaling sea el dueño del número de tasks, sin que Terraform lo revierta en cada apply |
 | `lifecycle { ignore_changes }` | `modules/data_store` — RDS Instance | Ignora cambios en `password` para que Terraform no intente actualizar la contraseña (RDS no expone la contraseña actual al provider) |
@@ -349,10 +360,7 @@ terraform output -raw dashboard_url
 
 Abrir esa URL en el browser. Ingresar con:
 
-| Campo | Valor |
-|-------|-------|
-| Usuario | `cloud` |
-| Contraseña | `cloud` |
+El dashboard usa Cognito Hosted UI. El primer acceso requiere crear el bootstrap admin con `make bootstrap-auth` (ver sección Dashboard Auth).
 
 La transacción `demo-001` debería aparecer en la tabla con su score y decisión.
 
@@ -366,16 +374,64 @@ El dashboard es un sitio web estático en S3 que consulta la API REST en tiempo 
 terraform output -raw dashboard_url
 ```
 
-**Credenciales de acceso:** `cloud` / `cloud`
+La URL anterior es el endpoint website HTTP de S3. Para el flujo Cognito se registra también el objeto HTTPS:
+
+```bash
+terraform output -raw dashboard_app_url
+```
+
+Abrí `dashboard_app_url` para login con Cognito Hosted UI.
+
+### Dashboard Auth
+
+El dashboard distingue entre:
+
+- **Transaction User**: `user_id` interno de las transacciones financieras.
+- **Dashboard User**: persona autenticada en Cognito que quiere ver el dashboard.
+
+Cognito autentica. RDS autoriza. La tabla `dashboard_access` permite que el bootstrap admin invite emails antes de que el usuario se registre. Cuando el usuario entra con Cognito y su email está verificado, `/dashboard/me` activa la invitación pendiente y recién ahí el dashboard carga datos financieros.
+
+Crear el primer admin:
+
+```bash
+make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com
+```
+
+Si además querés que el script cree o resetee el usuario Cognito con contraseña permanente:
+
+```bash
+make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com BOOTSTRAP_PASSWORD='UnaPasswordDemo123'
+```
+
+`BOOTSTRAP_PASSWORD` es opcional. Si no se pasa, el script sólo crea el acceso admin en RDS y el admin debe registrarse por Cognito Hosted UI con el mismo email. El script es idempotente y falla si ya existe otro bootstrap admin distinto.
+
+Las invitaciones no envían emails. El bootstrap admin crea el invite desde la pestaña **Invitaciones**; el invitado entra por la URL del dashboard, se registra con el mismo email en Cognito, verifica el correo y queda habilitado como usuario read-only. Los usuarios read-only ven datos del dashboard pero no ven ni pueden usar la pestaña de invitaciones; eso es esperado, no un bug.
+
+GitHub Actions puede ejecutar el bootstrap automáticamente después del apply si existen estos secrets:
+
+| Secret | Requerido | Uso |
+|--------|-----------|-----|
+| `BOOTSTRAP_EMAIL` | Sí para bootstrap automático | Email del bootstrap admin |
+| `BOOTSTRAP_PASSWORD` | No | Si existe, crea/resetea el usuario Cognito |
+| `GOOGLE_OAUTH_CLIENT_ID` | No | Habilita Google OAuth si se define junto al secret |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | No | Habilita Google OAuth si se define junto al client ID |
+
+Para Google OAuth, configurá en Google Cloud el redirect URI de Cognito:
+
+```text
+https://itba-fraud-auth-<account-id>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
+```
+
+El dashboard incluye un modal de cuenta para cambiar contraseña en usuarios Cognito locales. Usuarios federados por Google no ven esa opción porque su contraseña se administra en Google.
 
 **Endpoints de la API:**
 
 ```bash
 API=$(terraform output -raw api_endpoint)
 
-curl "$API/health"                        # {"status": "ok"}
-curl "$API/stats"                         # totales por decisión
-curl "$API/transactions?limit=10"         # últimas 10 transacciones
+curl -H "Authorization: Bearer <id-token>" "$API/health"
+curl -H "Authorization: Bearer <id-token>" "$API/stats"
+curl -H "Authorization: Bearer <id-token>" "$API/transactions?limit=10"
 ```
 
 ---

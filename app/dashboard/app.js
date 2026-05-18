@@ -1,13 +1,27 @@
 (function () {
   "use strict";
 
-  const DEMO_USER    = "cloud";
-  const DEMO_PASS    = "cloud";
-  const SESSION_KEY  = "fd_session_v2";
-  const AUTO_REFRESH = 60_000;
+  const DEMO_USER        = "cloud";
+  const DEMO_PASS        = "cloud";
+  const SESSION_KEY      = "fd_session_v2";
+  const COGNITO_KEY      = "fd_cognito_session_v1";
+  const PKCE_KEY         = "fd_cognito_pkce_v1";
+  const AUTO_REFRESH     = 60_000;
+  const TOKEN_REFRESH_PAD = 60_000;
 
   // ── State ──────────────────────────────────────────────────────────────────
   let refreshTimer = null;
+  let tokenRefreshTimer = null;
+  let authState = {
+    mode: "local",
+    config: null,
+    tokens: null,
+    me: null,
+    canManageInvites: false,
+    canChangePassword: false,
+    isActive: false,
+    deniedReason: "",
+  };
 
   // Global filters — shared across all tabs
   let gf = { user_id: "", country: "", channel: "", from: "", to: "" };
@@ -115,16 +129,519 @@
     return `<div class="kpi-card${variant ? " " + variant : ""}"><div class="kpi-value">${esc(String(value))}</div><div class="kpi-label">${esc(label)}</div></div>`;
   }
 
-  // ── API ────────────────────────────────────────────────────────────────────
+  function textOrEmpty(value) {
+    return value == null ? "" : String(value).trim();
+  }
+
+  function nowlessUrl() {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  }
+
+  function base64UrlFromBytes(bytes) {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function randomUrlSafeString(byteLength = 64) {
+    const bytes = new Uint8Array(byteLength);
+    crypto.getRandomValues(bytes);
+    return base64UrlFromBytes(bytes);
+  }
+
+  async function sha256UrlSafe(value) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return base64UrlFromBytes(new Uint8Array(digest));
+  }
+
+  function storageGetJson(key) {
+    try {
+      const raw = sessionStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function storageSetJson(key, value) {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  }
+
+  function clearAuthStorage() {
+    sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(COGNITO_KEY);
+    sessionStorage.removeItem(PKCE_KEY);
+  }
+
+  function currentRedirectUri() {
+    const explicit = textOrEmpty(window.COGNITO_REDIRECT_URI || window.DASHBOARD_REDIRECT_URI);
+    return explicit || nowlessUrl();
+  }
+
+  function resolveCognitoConfig() {
+    const source = [
+      window.COGNITO_CONFIG,
+      window.DASHBOARD_AUTH_CONFIG,
+      window.AUTH_CONFIG,
+    ].find(v => v && typeof v === "object") || {};
+    const read = (...keys) => {
+      for (const key of keys) {
+        const camel = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+        for (const candidate of [key, key.toUpperCase(), camel]) {
+          const fromObj = source[candidate];
+          if (typeof fromObj === "string" && fromObj.trim()) return fromObj.trim();
+          const fromWindow = window[candidate];
+          if (typeof fromWindow === "string" && fromWindow.trim()) return fromWindow.trim();
+        }
+      }
+      return "";
+    };
+    const domain = read("domain", "cognito_domain", "hosted_ui_domain", "user_pool_domain");
+    const clientId = read("client_id", "clientId", "cognito_client_id");
+    const logoutUri = read("logout_uri", "logoutUri", "cognito_logout_uri") || currentRedirectUri();
+    const forgotPasswordUrl = read("forgot_password_url", "forgotPasswordUrl", "cognito_forgot_password_url");
+    const scope = read("scope") || "openid email profile";
+    const redirectUri = read("redirect_uri", "redirectUri", "cognito_redirect_uri") || currentRedirectUri();
+    return {
+      domain,
+      clientId,
+      logoutUri,
+      forgotPasswordUrl,
+      scope,
+      redirectUri,
+    };
+  }
+
+  function useCognito() {
+    return Boolean(authState.config?.domain && authState.config?.clientId);
+  }
+
+  function cognitoBaseUrl() {
+    const base = textOrEmpty(authState.config?.domain);
+    if (!base) return "";
+    if (/^https?:\/\//i.test(base)) return base.replace(/\/$/, "");
+    return `https://${base.replace(/\/$/, "")}`;
+  }
+
+  function buildCognitoUrl(path, params = {}) {
+    const base = cognitoBaseUrl();
+    if (!base) return "";
+    const url = new URL(path, base);
+    Object.entries(params).forEach(([key, value]) => {
+      if (value != null && String(value).length > 0) {
+        url.searchParams.set(key, String(value));
+      }
+    });
+    return url.toString();
+  }
+
+  function buildAuthHeaders(extra = {}) {
+    const headers = { ...extra };
+    if (authState.mode === "cognito" && authState.tokens?.id_token) {
+      headers.Authorization = `Bearer ${authState.tokens.id_token}`;
+    }
+    if (authState.mode === "cognito" && authState.tokens?.access_token) {
+      headers["X-Cognito-Access-Token"] = authState.tokens.access_token;
+    }
+    return headers;
+  }
+
+  async function readResponseBody(res) {
+    const contentType = res.headers.get("content-type") || "";
+    if (res.status === 204) return null;
+    if (contentType.includes("application/json")) return res.json();
+    const text = await res.text();
+    try {
+      return text ? JSON.parse(text) : null;
+    } catch (_) {
+      return text || null;
+    }
+  }
+
   const apiBase = () => (window.API_BASE || "").replace(/\/$/, "");
 
-  async function apiFetch(path) {
-    const res = await fetch(apiBase() + path, { headers: { Accept: "application/json" } });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body?.error?.message || "HTTP " + res.status);
+  async function apiFetch(path, options = {}) {
+    const {
+      method = "GET",
+      body = null,
+      headers = {},
+      auth = true,
+    } = options;
+    const requestHeaders = {
+      Accept: "application/json",
+      ...headers,
+    };
+    if (auth) Object.assign(requestHeaders, buildAuthHeaders());
+    const init = { method, headers: requestHeaders };
+    if (body != null) {
+      if (body instanceof FormData) {
+        init.body = body;
+      } else if (typeof body === "string") {
+        init.body = body;
+      } else {
+        init.body = JSON.stringify(body);
+        init.headers["Content-Type"] = "application/json";
+      }
     }
-    return res.json();
+    const res = await fetch(apiBase() + path, init);
+    const payload = await readResponseBody(res).catch(() => null);
+    if (!res.ok) {
+      const message =
+        payload?.error?.message ||
+        payload?.message ||
+        payload?.detail ||
+        `HTTP ${res.status}`;
+      const err = new Error(message);
+      err.status = res.status;
+      err.payload = payload;
+      throw err;
+    }
+    return payload;
+  }
+
+  function normalizeEnvelope(payload) {
+    if (!payload) return null;
+    return payload.data != null ? payload.data : payload;
+  }
+
+  function normalizeArrayPayload(payload) {
+    const data = normalizeEnvelope(payload);
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(payload?.items)) return payload.items;
+    if (Array.isArray(payload?.invites)) return payload.invites;
+    return [];
+  }
+
+  function isSessionExpiredError(err) {
+    return Number(err?.status) === 401;
+  }
+
+  function readStoredTokens() {
+    return storageGetJson(COGNITO_KEY);
+  }
+
+  function saveStoredTokens(tokens) {
+    storageSetJson(COGNITO_KEY, tokens);
+  }
+
+  function clearTimers() {
+    clearInterval(refreshTimer);
+    clearTimeout(tokenRefreshTimer);
+    refreshTimer = null;
+    tokenRefreshTimer = null;
+  }
+
+  function clearAuthState() {
+    clearTimers();
+    authState = {
+      mode: useCognito() ? "cognito" : "local",
+      config: authState.config,
+      tokens: null,
+      me: null,
+      canManageInvites: false,
+      canChangePassword: false,
+      isActive: false,
+      deniedReason: "",
+    };
+  }
+
+  function hideAllViews() {
+    $("view-login").hidden = true;
+    $("view-app").hidden = true;
+    const denied = $("view-denied");
+    if (denied) denied.hidden = true;
+  }
+
+  function setLoginMode(mode) {
+    const loading = $("auth-loading");
+    const local = $("auth-local");
+    const cognito = $("auth-cognito");
+    if (loading) loading.hidden = mode !== "loading";
+    if (local) local.hidden = mode !== "local";
+    if (cognito) cognito.hidden = mode !== "cognito";
+  }
+
+  function showLoginScreen(message = "") {
+    hideAllViews();
+    $("view-login").hidden = false;
+    setLoginMode(useCognito() ? "cognito" : "local");
+    const status = $("auth-status");
+    if (status) status.hidden = true;
+    setStatus("offline");
+    $("login-error").textContent = message;
+    $("login-error").hidden = !message;
+  }
+
+  function showLoadingScreen(message = "Verificando sesión…") {
+    hideAllViews();
+    $("view-login").hidden = false;
+    setLoginMode("loading");
+    const status = $("auth-status");
+    if (status) {
+      status.hidden = false;
+      status.textContent = message;
+    }
+    $("login-error").hidden = true;
+  }
+
+  function showDeniedScreen(reason) {
+    hideAllViews();
+    const denied = $("view-denied");
+    if (denied) denied.hidden = false;
+    const status = $("auth-status");
+    if (status) status.hidden = true;
+    const msg = $("denied-message");
+    if (msg) msg.textContent = reason || "Tu cuenta no tiene acceso al panel.";
+    const details = $("denied-details");
+    if (details) {
+      const email = textOrEmpty(authState.me?.email || authState.me?.user_email);
+      const role = textOrEmpty(authState.me?.role || authState.me?.user_role);
+      details.textContent = [email && `Email: ${email}`, role && `Rol: ${role}`].filter(Boolean).join(" · ");
+    }
+  }
+
+  function showAppShell() {
+    hideAllViews();
+    $("view-app").hidden = false;
+  }
+
+  function updatePermissionedUi() {
+    const inviteButton = $("tab-btn-invites");
+    const invitePane = $("tab-invites");
+    const settingsButton = $("btn-settings");
+    if (inviteButton) inviteButton.hidden = !authState.canManageInvites;
+    if (invitePane) invitePane.hidden = !authState.canManageInvites;
+    if (settingsButton) settingsButton.hidden = !(authState.isActive && authState.me);
+    const current = document.querySelector(".tab-btn.active");
+    if (current?.hidden) setTab("overview");
+  }
+
+  function scheduleTokenRefresh() {
+    clearTimeout(tokenRefreshTimer);
+    if (authState.mode !== "cognito" || !authState.tokens?.id_token) return;
+    const expiresAt = Number(authState.tokens.expires_at || 0);
+    if (!expiresAt) return;
+    const delay = Math.max(10_000, expiresAt - Date.now() - TOKEN_REFRESH_PAD);
+    tokenRefreshTimer = setTimeout(() => {
+      clearAuthStorage();
+      showLoginScreen("Tu sesión expiró. Volvé a iniciar sesión.");
+    }, delay);
+  }
+
+  function setAccountModalContent() {
+    const modal = $("account-modal");
+    if (!modal || !authState.me) return;
+    $("account-email").textContent = textOrEmpty(authState.me.email || authState.me.user_email) || "—";
+    $("account-role").textContent = textOrEmpty(authState.me.role || authState.me.user_role) || "—";
+    $("account-status").textContent = authState.deniedReason ? "Acceso restringido" : "Activo";
+    const passwordBox = $("account-password-box");
+    const fallbackActions = $("account-passwordless-actions");
+    if (passwordBox) passwordBox.hidden = !authState.canChangePassword;
+    if (fallbackActions) fallbackActions.hidden = authState.canChangePassword;
+    $("account-password-form").reset();
+    $("account-password-message").textContent = "";
+    if (authState.canChangePassword) {
+      $("account-password-hint").textContent = "El cambio se valida contra Cognito usando tu token actual.";
+    }
+    modal.showModal();
+  }
+
+  function buildDeniedReason(me, fallback = "Tu cuenta no puede acceder al panel.") {
+    const status = textOrEmpty(me?.status || me?.account_status || me?.access_status).toLowerCase();
+    if (me?.email_verified === false || me?.is_email_verified === false) return "Debes verificar tu correo antes de ingresar.";
+    if (me?.disabled === true || me?.enabled === false || status === "disabled") return "Tu acceso está deshabilitado.";
+    if (me?.invited === false || me?.is_invited === false || status === "pending") return "Tu cuenta todavía no fue invitada o no fue aprobada.";
+    if (me?.can_access_dashboard === false || me?.access_granted === false || me?.authorized === false || status === "unauthorized") return "No tenés permisos para ver este panel.";
+    return fallback;
+  }
+
+  async function exchangeCodeForTokens(code, verifier) {
+    const tokenUrl = buildCognitoUrl("/oauth2/token");
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: authState.config.clientId,
+      code,
+      code_verifier: verifier,
+      redirect_uri: authState.config.redirectUri,
+    });
+    const res = await fetch(tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body,
+    });
+    const payload = await readResponseBody(res).catch(() => null);
+    if (!res.ok) {
+      throw new Error(payload?.error_description || payload?.error || payload?.message || `HTTP ${res.status}`);
+    }
+    return {
+      access_token: payload.access_token,
+      id_token: payload.id_token,
+      refresh_token: payload.refresh_token,
+      token_type: payload.token_type,
+      expires_at: Date.now() + (Number(payload.expires_in || 0) * 1000),
+    };
+  }
+
+  async function loadDashboardMe() {
+    const response = await apiFetch("/dashboard/me");
+    return normalizeEnvelope(response) || {};
+  }
+
+  async function resumeCognitoSession() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error")) {
+      const msg = params.get("error_description") || params.get("error");
+      window.history.replaceState({}, document.title, nowlessUrl());
+      throw new Error(msg || "No se pudo completar el ingreso con Cognito.");
+    }
+
+    const code = params.get("code");
+    if (code) {
+      const storedPkce = storageGetJson(PKCE_KEY);
+      if (!storedPkce?.verifier) throw new Error("Faltan datos de inicio de sesión para completar el intercambio de tokens.");
+      if (params.get("state") && storedPkce.state && params.get("state") !== storedPkce.state) {
+        throw new Error("El estado de autenticación no coincide.");
+      }
+      const tokens = await exchangeCodeForTokens(code, storedPkce.verifier);
+      saveStoredTokens(tokens);
+      sessionStorage.removeItem(PKCE_KEY);
+      window.history.replaceState({}, document.title, nowlessUrl());
+      authState.tokens = tokens;
+      return tokens;
+    }
+
+    const stored = readStoredTokens();
+    if (!stored?.id_token) return null;
+    authState.tokens = stored;
+    if (stored.expires_at && Date.now() > stored.expires_at - TOKEN_REFRESH_PAD) {
+      clearAuthStorage();
+      return null;
+    }
+    return stored;
+  }
+
+  async function verifyCognitoAccess(tokens) {
+    authState.tokens = tokens;
+    const me = await loadDashboardMe();
+    authState.me = me;
+    authState.canManageInvites = Boolean(me?.can_manage_invites);
+    authState.canChangePassword = Boolean(me?.can_change_password);
+    authState.isActive = !isDeniedProfile(me);
+    authState.deniedReason = authState.isActive ? "" : buildDeniedReason(me);
+    return { me, tokens };
+  }
+
+  function isDeniedProfile(me) {
+    return Boolean(
+      me?.email_verified === false ||
+      me?.is_email_verified === false ||
+      me?.disabled === true ||
+      me?.enabled === false ||
+      me?.invited === false ||
+      me?.is_invited === false ||
+      me?.can_access_dashboard === false ||
+      me?.access_granted === false ||
+      me?.authorized === false ||
+      String(me?.status || me?.account_status || me?.access_status || "").toLowerCase() === "disabled" ||
+      String(me?.status || me?.account_status || me?.access_status || "").toLowerCase() === "pending" ||
+      String(me?.status || me?.account_status || me?.access_status || "").toLowerCase() === "unauthorized"
+    );
+  }
+
+  async function bootstrapCognito() {
+    authState.mode = "cognito";
+    try {
+      const tokens = await resumeCognitoSession();
+      if (!tokens?.access_token) {
+        showLoginScreen();
+        return;
+      }
+      const access = await verifyCognitoAccess(tokens);
+      if (!authState.isActive) {
+        showDeniedScreen(authState.deniedReason);
+        return;
+      }
+      clearTimers();
+      showAppShell();
+      updatePermissionedUi();
+      await loadFiltersDropdowns();
+      setTab("overview");
+      scheduleTokenRefresh();
+      return access;
+    } catch (err) {
+      clearAuthStorage();
+      if (Number(err?.status) === 403) {
+        authState.deniedReason = err.message || "Tu cuenta no tiene acceso al panel.";
+        showDeniedScreen(authState.deniedReason);
+        return;
+      }
+      showLoginScreen(err.message || "No se pudo iniciar sesión.");
+    }
+  }
+
+  function startCognitoLogin() {
+    if (!useCognito()) {
+      showLoginScreen("La configuración de Cognito no está disponible.");
+      return;
+    }
+    const verifier = randomUrlSafeString(64);
+    const state = randomUrlSafeString(16);
+    storageSetJson(PKCE_KEY, { verifier, state, created_at: Date.now() });
+    sha256UrlSafe(verifier).then(challenge => {
+      const url = buildCognitoUrl("/oauth2/authorize", {
+        response_type: "code",
+        client_id: authState.config.clientId,
+        redirect_uri: authState.config.redirectUri,
+        scope: authState.config.scope,
+        state,
+        code_challenge_method: "S256",
+        code_challenge: challenge,
+      });
+      window.location.assign(url);
+    }).catch(err => {
+      showLoginScreen(err.message || "No se pudo iniciar el inicio de sesión.");
+    });
+  }
+
+  function buildForgotPasswordUrl() {
+    if (authState.config?.forgotPasswordUrl) return authState.config.forgotPasswordUrl;
+    return buildCognitoUrl("/forgotPassword", {
+      client_id: authState.config?.clientId,
+      redirect_uri: authState.config?.redirectUri,
+      response_type: "code",
+      scope: authState.config?.scope,
+    });
+  }
+
+  function buildLogoutUrl() {
+    const url = buildCognitoUrl("/logout", {
+      client_id: authState.config?.clientId,
+      logout_uri: authState.config?.logoutUri,
+    });
+    return url;
+  }
+
+  function doLogout() {
+    clearAuthStorage();
+    clearTimers();
+    authState.tokens = null;
+    authState.me = null;
+    authState.isActive = false;
+    authState.canManageInvites = false;
+    authState.canChangePassword = false;
+    authState.deniedReason = "";
+    if (useCognito()) {
+      window.location.assign(buildLogoutUrl());
+      return;
+    }
+    sessionStorage.removeItem(SESSION_KEY);
+    showLoginScreen();
   }
 
   function gfParams(extra) {
@@ -142,30 +659,53 @@
     return Object.values(gf).some(v => v !== "");
   }
 
-  // ── Auth ───────────────────────────────────────────────────────────────────
-  const isAuthed = () => sessionStorage.getItem(SESSION_KEY) === "1";
-
-  function doLogout() {
-    sessionStorage.removeItem(SESSION_KEY);
-    clearInterval(refreshTimer);
-    showView("login");
-  }
-
   // ── Views ──────────────────────────────────────────────────────────────────
   function showView(name) {
-    $("view-login").hidden = name !== "login";
-    $("view-app").hidden   = name !== "app";
-    if (name === "app") {
-      loadFiltersDropdowns();
-      setTab("overview");
+    hideAllViews();
+    if (name === "login") {
+      $("view-login").hidden = false;
+      setLoginMode(useCognito() ? "cognito" : "local");
+    } else if (name === "app") {
+      $("view-app").hidden = false;
+    } else if (name === "denied") {
+      const denied = $("view-denied");
+      if (denied) denied.hidden = false;
     }
   }
+
+  function setTab(tab) {
+    const allowedTab = tab === "invites" && !authState.canManageInvites ? "overview" : tab;
+    qsa(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === allowedTab));
+    qsa(".tab-pane").forEach(p => p.classList.toggle("active", p.id === "tab-" + allowedTab));
+    clearInterval(refreshTimer);
+
+    if (allowedTab === "overview") {
+      loadOverview();
+      refreshTimer = setInterval(loadOverview, AUTO_REFRESH);
+    } else if (allowedTab === "transactions") {
+      loadTransactions();
+    } else if (allowedTab === "users") {
+      loadUsers();
+    } else if (allowedTab === "invites") {
+      loadInvites();
+    }
+  }
+
+  function setStatus(s) {
+    const dot = $("status-dot");
+    const text = $("status-text");
+    if (dot) dot.className = "dot " + s;
+    if (text) text.textContent = { online: "En línea", offline: "Sin conexión", loading: "Verificando…" }[s] || s;
+  }
+
+  function showErr(tab, msg) { const e = $("error-" + tab); if (e) { e.textContent = msg; e.hidden = false; } }
+  function clearErr(tab)     { const e = $("error-" + tab); if (e) { e.textContent = ""; e.hidden = true; } }
 
   // ── Global filters ─────────────────────────────────────────────────────────
   async function loadFiltersDropdowns() {
     try {
       const res = await apiFetch("/filters");
-      const { countries = [], channels = [] } = res.data || {};
+      const { countries = [], channels = [] } = normalizeEnvelope(res) || {};
       populateSelect("gf-country", countries, "País: todos");
       populateSelect("gf-channel", channels,  "Canal: todos");
     } catch (_) { /* non-fatal */ }
@@ -207,37 +747,13 @@
     if (active) setTab(active.dataset.tab);
   }
 
-  // ── Tabs ───────────────────────────────────────────────────────────────────
-  function setTab(tab) {
-    qsa(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-    qsa(".tab-pane").forEach(p => p.classList.toggle("active", p.id === "tab-" + tab));
-    clearInterval(refreshTimer);
-
-    if (tab === "overview") {
-      loadOverview();
-      refreshTimer = setInterval(loadOverview, AUTO_REFRESH);
-    } else if (tab === "transactions") {
-      loadTransactions();
-    } else if (tab === "users") {
-      loadUsers();
-    }
-  }
-
-  // ── Status ─────────────────────────────────────────────────────────────────
-  function setStatus(s) {
-    $("status-dot").className = "dot " + s;
-    $("status-text").textContent = { online: "En línea", offline: "Sin conexión", loading: "Verificando…" }[s] || s;
-  }
-  function showErr(tab, msg) { const e = $("error-" + tab); if (e) { e.textContent = msg; e.hidden = false; } }
-  function clearErr(tab)     { const e = $("error-" + tab); if (e) { e.textContent = ""; e.hidden = true; } }
-
   // ── Overview ───────────────────────────────────────────────────────────────
   async function loadOverview() {
     setStatus("loading");
     clearErr("overview");
     try {
-      const h = await apiFetch("/health");
-      setStatus(h?.data?.status === "ok" ? "online" : "offline");
+      const h = normalizeEnvelope(await apiFetch("/health"));
+      setStatus(h?.status === "ok" ? "online" : "offline");
     } catch (e) {
       setStatus("offline");
       showErr("overview", "No se pudo contactar la API: " + e.message);
@@ -256,12 +772,13 @@
     ]);
 
     if (statsR.status === "fulfilled") {
-      renderKpis(statsR.value.data);
-      renderPie(statsR.value.data);
+      const stats = normalizeEnvelope(statsR.value);
+      renderKpis(stats);
+      renderPie(stats);
     }
-    if (tsR.status   === "fulfilled") renderHourlyChart(tsR.value.data);
-    if (weekR.status === "fulfilled") renderWeeklyChart(weekR.value.data);
-    if (fraudR.status === "fulfilled") renderRecentFraud(fraudR.value.data);
+    if (tsR.status   === "fulfilled") renderHourlyChart(normalizeArrayPayload(tsR.value));
+    if (weekR.status === "fulfilled") renderWeeklyChart(normalizeArrayPayload(weekR.value));
+    if (fraudR.status === "fulfilled") renderRecentFraud(normalizeArrayPayload(fraudR.value));
   }
 
   function renderKpis(stats) {
@@ -471,7 +988,7 @@
 
     try {
       const res = await apiFetch("/transactions?" + gfParams(extra));
-      renderTxTable(res.data, res.meta);
+      renderTxTable(normalizeArrayPayload(res), res?.meta || res?.pagination || {});
       updateSortHeaders("tx-table", txState);
     } catch (e) {
       showErr("transactions", e.message);
@@ -514,7 +1031,7 @@
         sort_by:    usersState.sortBy,
         sort_order: usersState.sortDir,
       }));
-      renderUsersTable(res.data, res.meta);
+      renderUsersTable(normalizeArrayPayload(res), res?.meta || res?.pagination || {});
       updateSortHeaders("users-table", usersState);
     } catch (e) {
       showErr("users", e.message);
@@ -556,7 +1073,7 @@
     $("user-modal").showModal();
     try {
       const res = await apiFetch("/users/" + encodeURIComponent(userId));
-      const u = res.data;
+      const u = normalizeEnvelope(res) || {};
       const rate = u.total_transactions > 0 ? ((u.fraud_count / u.total_transactions) * 100).toFixed(1) + "%" : "0%";
       const txRows = (u.recent_transactions || []).map(tx => `<tr>
         <td class="mono">${esc(tx.transaction_id)}</td>
@@ -587,22 +1104,186 @@
     }
   }
 
+  // ── Account / invitations ─────────────────────────────────────────────────
+  function openAccountModal() {
+    if (!authState.me) return;
+    setAccountModalContent();
+  }
+
+  function closeAccountModal() {
+    const modal = $("account-modal");
+    if (modal?.open) modal.close();
+  }
+
+  async function submitPasswordChange(e) {
+    e.preventDefault();
+    const message = $("account-password-message");
+    message.textContent = "";
+    const current_password = $("current-password").value;
+    const new_password = $("new-password").value;
+    const confirmation = $("confirm-password").value;
+    if (!current_password || !new_password || !confirmation) {
+      message.textContent = "Completá todos los campos.";
+      return;
+    }
+    if (new_password !== confirmation) {
+      message.textContent = "La confirmación no coincide.";
+      return;
+    }
+    try {
+      await apiFetch("/dashboard/me/password", {
+        method: "PUT",
+        body: {
+          current_password,
+          new_password,
+          new_password_confirmation: confirmation,
+        },
+      });
+      $("account-password-form").reset();
+      message.textContent = "Contraseña actualizada.";
+    } catch (err) {
+      message.textContent = err.message;
+    }
+  }
+
+  async function loadInvites() {
+    if (!authState.canManageInvites) return;
+    clearErr("invites");
+    const tbody = $("invites-tbody");
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="loading-row">Cargando…</td></tr>';
+    try {
+      const res = await apiFetch("/dashboard/invites");
+      renderInvitesTable(normalizeArrayPayload(res));
+    } catch (err) {
+      showErr("invites", err.message);
+      if (tbody) tbody.innerHTML = "";
+    }
+  }
+
+  function renderInvitesTable(rows) {
+    const tbody = $("invites-tbody");
+    if (!tbody) return;
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-row">No hay invitaciones.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(row => {
+      const email = textOrEmpty(row.email || row.user_email || row.invited_email);
+      const displayName = textOrEmpty(row.display_name || row.name);
+      const isBootstrapAdmin = Boolean(row.is_bootstrap_admin);
+      const isDisabled = Boolean(row.disabled || row.is_disabled || row.revoked || row.archived);
+      const status = isBootstrapAdmin ? "Bootstrap admin" : isDisabled ? "Deshabilitada" : (row.status || "Activa");
+      const disabledLabel = isBootstrapAdmin ? "Protegida" : "Deshabilitar";
+      return `<tr>
+        <td>${esc(email)}</td>
+        <td>${esc(displayName || "—")}</td>
+        <td>${esc(status)}</td>
+        <td>${isBootstrapAdmin ? '<span class="pill challenge">Protegida</span>' : (isDisabled ? '<span class="pill block">Inactiva</span>' : '<span class="pill allow">Activa</span>')}</td>
+        <td>
+          <button class="btn-ghost btn-mini invite-disable" data-email="${esc(email)}" ${isBootstrapAdmin || isDisabled ? "disabled" : ""}>${esc(disabledLabel)}</button>
+        </td>
+      </tr>`;
+    }).join("");
+    tbody.querySelectorAll(".invite-disable").forEach(btn => {
+      btn.addEventListener("click", () => disableInvite(btn.dataset.email));
+    });
+  }
+
+  async function createInvite(e) {
+    e.preventDefault();
+    const message = $("invite-message");
+    message.textContent = "";
+    const email = $("invite-email").value.trim();
+    const display_name = $("invite-display-name").value.trim();
+    if (!email) {
+      message.textContent = "Ingresá un email.";
+      return;
+    }
+    try {
+      await apiFetch("/dashboard/invites", {
+        method: "POST",
+        body: {
+          email,
+          display_name: display_name || null,
+        },
+      });
+      $("invite-form").reset();
+      message.textContent = "Invitación creada.";
+      await loadInvites();
+    } catch (err) {
+      message.textContent = err.message;
+    }
+  }
+
+  async function disableInvite(email) {
+    if (!email) return;
+    if (!window.confirm(`Deshabilitar invitación para ${email}?`)) return;
+    const attempts = [
+      { path: "/dashboard/invites", body: { email } },
+      { path: `/dashboard/invites/${encodeURIComponent(email)}` },
+      { path: `/dashboard/invites?email=${encodeURIComponent(email)}` },
+    ];
+    let lastErr = null;
+    for (const attempt of attempts) {
+      try {
+        await apiFetch(attempt.path, {
+          method: "DELETE",
+          body: attempt.body || null,
+        });
+        await loadInvites();
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (![404, 405].includes(Number(err.status))) break;
+      }
+    }
+    showErr("invites", lastErr?.message || "No se pudo deshabilitar la invitación.");
+  }
+
   // ── Bootstrap ──────────────────────────────────────────────────────────────
   function init() {
+    authState.config = resolveCognitoConfig();
+    authState.mode = useCognito() ? "cognito" : "local";
+    setLoginMode(useCognito() ? "cognito" : "local");
+
     // Login
     $("login-form").addEventListener("submit", e => {
       e.preventDefault();
-      const u = $("login-user").value.trim(), p = $("login-pass").value;
+      if (useCognito()) return;
+      const u = $("login-user").value.trim();
+      const p = $("login-pass").value;
       if (u === DEMO_USER && p === DEMO_PASS) {
         sessionStorage.setItem(SESSION_KEY, "1");
+        authState.isActive = true;
+        authState.deniedReason = "";
         $("login-error").textContent = "";
-        showView("app");
+        showAppShell();
+        updatePermissionedUi();
+        loadFiltersDropdowns().then(() => setTab("overview"));
       } else {
         $("login-error").textContent = "Usuario o contraseña incorrectos.";
       }
     });
+    const cognitoLoginButton = $("btn-cognito-login");
+    if (cognitoLoginButton) cognitoLoginButton.addEventListener("click", startCognitoLogin);
+    const forgotPasswordLink = $("forgot-password-link");
+    if (forgotPasswordLink) {
+      forgotPasswordLink.addEventListener("click", e => {
+        if (!useCognito()) return;
+        e.preventDefault();
+        window.location.assign(buildForgotPasswordUrl());
+      });
+    }
 
     $("btn-logout").addEventListener("click", doLogout);
+    const deniedLogout = $("btn-denied-logout");
+    if (deniedLogout) deniedLogout.addEventListener("click", doLogout);
+    const accountLogout = $("account-logout");
+    if (accountLogout) accountLogout.addEventListener("click", doLogout);
+    const accountLogoutFallback = $("account-logout-fallback");
+    if (accountLogoutFallback) accountLogoutFallback.addEventListener("click", doLogout);
+    const settingsButton = $("btn-settings");
+    if (settingsButton) settingsButton.addEventListener("click", openAccountModal);
     $("btn-refresh").addEventListener("click", () => {
       const active = document.querySelector(".tab-btn.active");
       if (active) setTab(active.dataset.tab);
@@ -639,12 +1320,32 @@
     $("users-prev").addEventListener("click", () => { usersState.offset = Math.max(0, usersState.offset - usersState.limit); loadUsers(); });
     $("users-next").addEventListener("click", () => { usersState.offset += usersState.limit; loadUsers(); });
 
+    // Account modal
+    $("account-modal-close").addEventListener("click", closeAccountModal);
+    $("account-modal").addEventListener("click", e => { if (e.target === e.currentTarget) closeAccountModal(); });
+    $("account-password-form").addEventListener("submit", submitPasswordChange);
+
+    // Invites
+    $("invite-form").addEventListener("submit", createInvite);
+
     // User modal
     $("user-modal-close").addEventListener("click", () => $("user-modal").close());
     $("user-modal").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 
-    if (isAuthed()) showView("app");
-    else showView("login");
+    if (useCognito()) {
+      showLoadingScreen();
+      bootstrapCognito();
+      return;
+    }
+
+    if (sessionStorage.getItem(SESSION_KEY) === "1") {
+      authState.isActive = true;
+      showAppShell();
+      updatePermissionedUi();
+      loadFiltersDropdowns().then(() => setTab("overview"));
+    } else {
+      showLoginScreen();
+    }
   }
 
   document.addEventListener("DOMContentLoaded", init);

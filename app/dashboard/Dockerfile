@@ -1,14 +1,30 @@
 FROM alpine:3.21 AS build
 
 ARG API_BASE=http://localhost:5000
+ARG COGNITO_CLIENT_ID=
+ARG COGNITO_DOMAIN=
+ARG COGNITO_REDIRECT_URI=
+ARG COGNITO_LOGOUT_URI=
+ARG COGNITO_USER_POOL_ID=
+ARG COGNITO_ISSUER=
 
 WORKDIR /site
 
 COPY dashboard/index.html dashboard/app.js ./
 
 RUN printf '%s\n' \
-    '// API Gateway endpoint - generated during the dashboard build.' \
+    '// Dashboard runtime config - generated during the dashboard build.' \
     "window.API_BASE = \"${API_BASE}\";" \
+    'window.COGNITO_CONFIG = {' \
+    "  clientId: \"${COGNITO_CLIENT_ID}\"," \
+    "  domain: \"${COGNITO_DOMAIN}\"," \
+    "  redirectUri: \"${COGNITO_REDIRECT_URI}\"," \
+    "  logoutUri: \"${COGNITO_LOGOUT_URI}\"," \
+    "  userPoolId: \"${COGNITO_USER_POOL_ID}\"," \
+    "  issuer: \"${COGNITO_ISSUER}\"" \
+    '};' \
+    'window.COGNITO = window.COGNITO_CONFIG;' \
+    'window.AUTH_CONFIG = window.COGNITO_CONFIG;' \
     > config.js
 
 FROM scratch AS export

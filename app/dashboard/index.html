@@ -54,9 +54,19 @@
     .field input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-light); }
     .btn-primary { cursor: pointer; font: inherit; font-weight: 600; border: none; border-radius: var(--radius-sm); padding: .65rem 1rem; width: 100%; background: var(--accent); color: #fff; transition: filter .15s; }
     .btn-primary:hover { filter: brightness(1.08); }
+    .btn-primary:disabled { opacity: .6; cursor: default; }
+    .auth-status { margin: 0 0 1rem; font-size: .82rem; color: var(--text-soft); min-height: 1.2em; }
+    .auth-block { margin-bottom: 1rem; }
+    .auth-link { color: var(--accent); text-decoration: none; font-size: .8rem; }
+    .auth-link:hover { text-decoration: underline; }
+    .auth-note { margin-top: .85rem; font-size: .75rem; color: var(--text-soft); }
     .login-hint { margin-top: .85rem; font-size: .75rem; color: var(--text-soft); text-align: center; }
     .login-hint strong { color: var(--text); }
     #login-error { margin-top: .5rem; font-size: .8rem; color: var(--danger); min-height: 1.2em; }
+    .denied-card { display: grid; gap: .75rem; }
+    .denied-title { margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: -.02em; }
+    .denied-copy { margin: 0; color: var(--text-soft); }
+    .denied-meta { margin: 0; color: var(--text-soft); font-size: .8rem; }
 
     /* ── App shell ──────────────────────────────────────── */
     #view-app { display: flex; flex-direction: column; min-height: 100vh; }
@@ -80,6 +90,7 @@
     .btn-ghost:hover { background: var(--bg); }
     .btn-ghost.danger { color: var(--danger); border-color: #fecaca; }
     .btn-ghost.danger:hover { background: var(--danger-light); }
+    .btn-mini { padding: .3rem .55rem; font-size: .75rem; }
 
     /* ── Tabs ───────────────────────────────────────────── */
     .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 1.5rem; }
@@ -227,6 +238,23 @@
     .modal-body { padding: 1.25rem 1.5rem; }
     .modal-body h4 { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-soft); margin: 0 0 .65rem; }
     .user-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .6rem; margin-bottom: 1.25rem; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .6rem; margin-bottom: 1rem; }
+    .summary-item { padding: .8rem .9rem; border-radius: var(--radius-sm); background: #fafbfc; border: 1px solid var(--border); }
+    .summary-label { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-soft); margin-bottom: .25rem; }
+    .summary-value { font-weight: 600; }
+    .form-grid { display: grid; gap: .85rem; }
+    .form-row { display: grid; gap: .85rem; grid-template-columns: 1fr 1fr; }
+    @media (max-width: 640px) { .form-row { grid-template-columns: 1fr; } }
+    .help-text { margin: .35rem 0 0; font-size: .75rem; color: var(--text-soft); }
+    .form-message { margin: .45rem 0 0; font-size: .8rem; min-height: 1.2em; color: var(--text-soft); }
+    .form-message.error { color: var(--danger); }
+    .form-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+    .form-actions .btn-ghost { width: auto; }
+    .table-actions { display: flex; gap: .35rem; justify-content: flex-end; }
+    .status-chip { display: inline-flex; align-items: center; padding: .15rem .45rem; border-radius: 999px; font-size: .68rem; font-weight: 600; }
+    .status-chip.active { background: var(--success-light); color: var(--success); }
+    .status-chip.inactive { background: var(--danger-light); color: var(--danger); }
+    .status-chip.protected { background: #fff7ed; color: #b45309; }
   </style>
 </head>
 <body>
@@ -238,20 +266,48 @@
       <div class="brand-logo">FD</div>
       <div><h1>Fraud Detector</h1></div>
     </div>
-    <p class="login-tagline">Panel de operaciones · Demo</p>
-    <form id="login-form" autocomplete="on">
-      <div class="field">
-        <label for="login-user">Usuario</label>
-        <input id="login-user" type="text" autocomplete="username" required />
-      </div>
-      <div class="field">
-        <label for="login-pass">Contraseña</label>
-        <input id="login-pass" type="password" autocomplete="current-password" required />
-      </div>
-      <button type="submit" class="btn-primary">Ingresar</button>
-      <p id="login-error" role="alert"></p>
-    </form>
-    <p class="login-hint">Credenciales demo: <strong>cloud / cloud</strong></p>
+    <p class="login-tagline">Panel de operaciones</p>
+    <p id="auth-status" class="auth-status" hidden></p>
+    <div id="auth-local" class="auth-block">
+      <form id="login-form" autocomplete="on">
+        <div class="field">
+          <label for="login-user">Usuario</label>
+          <input id="login-user" type="text" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="login-pass">Contraseña</label>
+          <input id="login-pass" type="password" autocomplete="current-password" required />
+        </div>
+        <button type="submit" class="btn-primary">Ingresar</button>
+      </form>
+      <p class="login-hint">Credenciales demo: <strong>cloud / cloud</strong></p>
+    </div>
+    <div id="auth-cognito" class="auth-block" hidden>
+      <button type="button" class="btn-primary" id="btn-cognito-login">Ingresar con Cognito</button>
+      <p class="auth-note">
+        <a href="#" id="forgot-password-link" class="auth-link">Olvidé mi contraseña</a>
+      </p>
+    </div>
+    <div id="auth-loading" class="auth-block" hidden>
+      <p class="login-hint" style="margin-top:0;text-align:left">Verificando el acceso al panel…</p>
+    </div>
+    <p id="login-error" role="alert"></p>
+  </div>
+</div>
+
+<!-- ── Access denied ─────────────────────────────────────────────────────── -->
+<div id="view-denied" hidden>
+  <div class="login-card denied-card">
+    <div class="login-brand">
+      <div class="brand-logo">FD</div>
+      <div><h1>Fraud Detector</h1></div>
+    </div>
+    <h2 class="denied-title">Acceso restringido</h2>
+    <p id="denied-message" class="denied-copy">Tu cuenta no tiene acceso al panel.</p>
+    <p id="denied-details" class="denied-meta"></p>
+    <div class="form-actions">
+      <button type="button" class="btn-ghost danger" id="btn-denied-logout">Salir</button>
+    </div>
   </div>
 </div>
 
@@ -268,6 +324,7 @@
         <span class="dot" id="status-dot"></span>
         <span id="status-text">—</span>
       </div>
+      <button class="btn-ghost" id="btn-settings" hidden>Cuenta</button>
       <button class="btn-ghost" id="btn-refresh">Actualizar</button>
       <button class="btn-ghost danger" id="btn-logout">Salir</button>
     </div>
@@ -277,6 +334,7 @@
     <button class="tab-btn active" data-tab="overview"     role="tab">Resumen</button>
     <button class="tab-btn"        data-tab="transactions" role="tab">Transacciones</button>
     <button class="tab-btn"        data-tab="users"        role="tab">Usuarios</button>
+    <button class="tab-btn"        data-tab="invites"      role="tab" id="tab-btn-invites" hidden>Invitaciones</button>
   </nav>
 
   <!-- Global filter bar -->
@@ -416,6 +474,45 @@
       </div>
     </div>
 
+    <!-- ── Invitaciones ────────────────────────────────── -->
+    <div id="tab-invites" class="tab-pane" role="tabpanel" hidden>
+      <p id="error-invites" class="tab-error" hidden></p>
+      <div class="two-col" style="grid-template-columns: 320px 1fr">
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Crear invitación</p>
+          <form id="invite-form" class="form-grid">
+            <div class="field">
+              <label for="invite-email">Email</label>
+              <input id="invite-email" type="email" autocomplete="email" required />
+            </div>
+            <div class="field">
+              <label for="invite-display-name">Nombre visible</label>
+              <input id="invite-display-name" type="text" autocomplete="name" />
+            </div>
+            <button type="submit" class="btn-primary">Crear invitación</button>
+            <p id="invite-message" class="form-message"></p>
+          </form>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Invitaciones</p>
+          <div class="table-wrap">
+            <table id="invites-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Nombre</th>
+                  <th>Estado</th>
+                  <th>Protección</th>
+                  <th style="text-align:right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="invites-tbody"><tr><td colspan="5" class="loading-row">Cargando…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -426,6 +523,58 @@
     <button class="modal-close" id="user-modal-close" aria-label="Cerrar">✕</button>
   </div>
   <div class="modal-body" id="user-modal-body"></div>
+</dialog>
+
+<!-- ── Modal: cuenta ──────────────────────────────────────────────────────── -->
+<dialog id="account-modal" aria-labelledby="account-modal-title">
+  <div class="modal-header">
+    <h3 id="account-modal-title">Cuenta</h3>
+    <button class="modal-close" id="account-modal-close" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="summary-grid">
+      <div class="summary-item">
+        <span class="summary-label">Email</span>
+        <span class="summary-value" id="account-email">—</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Rol</span>
+        <span class="summary-value" id="account-role">—</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Estado</span>
+        <span class="summary-value" id="account-status">—</span>
+      </div>
+    </div>
+    <div id="account-password-box">
+      <h4>Cambiar contraseña</h4>
+      <p id="account-password-hint" class="help-text">Usá tu contraseña actual para autorizar el cambio.</p>
+      <form id="account-password-form" class="form-grid">
+        <div class="field">
+          <label for="current-password">Contraseña actual</label>
+          <input id="current-password" type="password" autocomplete="current-password" required />
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="new-password">Nueva contraseña</label>
+            <input id="new-password" type="password" autocomplete="new-password" required />
+          </div>
+          <div class="field">
+            <label for="confirm-password">Confirmación</label>
+            <input id="confirm-password" type="password" autocomplete="new-password" required />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" style="width:auto">Actualizar contraseña</button>
+          <button type="button" class="btn-ghost danger" id="account-logout">Salir</button>
+        </div>
+        <p id="account-password-message" class="form-message"></p>
+      </form>
+    </div>
+    <div class="form-actions" id="account-passwordless-actions" style="margin-top:0.75rem">
+      <button type="button" class="btn-ghost danger" id="account-logout-fallback">Salir</button>
+    </div>
+  </div>
 </dialog>
 
 <!-- Tooltip (shared, one instance) -->

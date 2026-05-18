@@ -12,6 +12,7 @@ locals {
     logs           = "com.amazonaws.${data.aws_region.current.name}.logs"
     sns            = "com.amazonaws.${data.aws_region.current.name}.sns"
     secretsmanager = "com.amazonaws.${data.aws_region.current.name}.secretsmanager"
+    cognito_idp    = "com.amazonaws.${data.aws_region.current.name}.cognito-idp"
   }
 
   gateway_endpoint_services = toset(["s3", "dynamodb"])

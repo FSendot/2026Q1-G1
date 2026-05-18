@@ -1,9 +1,14 @@
+import decimal
 import json
 import logging
 import os
+import re
+import uuid
 
+import boto3
 import psycopg2
 import psycopg2.extras
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -14,6 +19,7 @@ HEADERS = {
 }
 
 _conn = None
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _get_conn():
@@ -33,7 +39,10 @@ def _get_conn():
 
 def _ensure_schema(conn):
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
             CREATE TABLE IF NOT EXISTS transactions (
                 id             SERIAL PRIMARY KEY,
                 transaction_id VARCHAR(255) UNIQUE NOT NULL,
@@ -47,12 +56,39 @@ def _ensure_schema(conn):
                 decision       VARCHAR(20),
                 processed_at   TIMESTAMPTZ DEFAULT NOW()
             );
+
             CREATE INDEX IF NOT EXISTS idx_tx_processed_at ON transactions (processed_at DESC);
             CREATE INDEX IF NOT EXISTS idx_tx_is_fraud     ON transactions (is_fraud);
             CREATE INDEX IF NOT EXISTS idx_tx_user_id      ON transactions (user_id);
             CREATE INDEX IF NOT EXISTS idx_tx_country      ON transactions (country);
             CREATE INDEX IF NOT EXISTS idx_tx_channel      ON transactions (channel);
-        """)
+
+            CREATE TABLE IF NOT EXISTS dashboard_access (
+                id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email              TEXT NOT NULL,
+                email_normalized   TEXT NOT NULL UNIQUE,
+                display_name       TEXT,
+                role               TEXT NOT NULL CHECK (role IN ('admin', 'viewer')),
+                status             TEXT NOT NULL CHECK (status IN ('pending', 'active', 'disabled')),
+                cognito_sub        TEXT,
+                invited_by_email   TEXT,
+                is_bootstrap_admin BOOLEAN NOT NULL DEFAULT FALSE,
+                invited_at         TIMESTAMPTZ,
+                activated_at       TIMESTAMPTZ,
+                disabled_at        TIMESTAMPTZ,
+                last_login_at      TIMESTAMPTZ,
+                created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_dashboard_access_role
+                ON dashboard_access (role);
+            CREATE INDEX IF NOT EXISTS idx_dashboard_access_status
+                ON dashboard_access (status);
+            CREATE INDEX IF NOT EXISTS idx_dashboard_access_cognito_sub
+                ON dashboard_access (cognito_sub);
+            """
+        )
     conn.commit()
 
 
@@ -73,55 +109,317 @@ def _err(status, code, message):
     }
 
 
-def _serialize_row(r):
-    out = dict(r)
-    for ts_field in ("processed_at", "last_seen", "hour"):
-        if out.get(ts_field) is not None:
-            out[ts_field] = out[ts_field].isoformat()
-    for float_field in ("amount", "avg_fraud_score", "fraud_rate_pct"):
-        if out.get(float_field) is not None:
-            out[float_field] = float(out[float_field])
+def _headers(event):
+    raw_headers = event.get("headers") or {}
+    return {str(key).lower(): value for key, value in raw_headers.items() if value is not None}
+
+
+def _is_truthy(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _normalize_email(email):
+    return email.strip().lower()
+
+
+def _serialize_row(row):
+    out = dict(row)
+    for key, value in list(out.items()):
+        if isinstance(value, (uuid.UUID,)):
+            out[key] = str(value)
+        elif isinstance(value, (decimal.Decimal,)):
+            out[key] = float(value)
+        elif hasattr(value, "isoformat"):
+            out[key] = value.isoformat()
     return out
 
 
-_SORTABLE_TX    = {"amount", "fraud_score", "processed_at"}
-_SORTABLE_USERS = {"total_transactions", "fraud_count", "fraud_rate_pct", "avg_fraud_score", "last_seen"}
+def _json_body(event):
+    raw_body = event.get("body")
+    if raw_body in (None, ""):
+        return {}
+    if isinstance(raw_body, dict):
+        return raw_body
+    try:
+        return json.loads(raw_body)
+    except json.JSONDecodeError:
+        return None
 
 
-def _sort_clause(query, valid_cols, default_col, default_dir="DESC"):
-    col = query.get("sort_by", default_col)
-    if col not in valid_cols:
-        col = default_col
-    raw_dir = query.get("sort_order", default_dir).upper()
-    direction = "DESC" if raw_dir not in ("ASC", "DESC") else raw_dir
-    return col, direction
+def _parse_int(value, default, minimum=None, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if minimum is not None:
+        parsed = max(parsed, minimum)
+    if maximum is not None:
+        parsed = min(parsed, maximum)
+    return parsed
+
+
+def _is_date_only(value):
+    return isinstance(value, str) and _DATE_ONLY_RE.match(value) is not None
+
+
+def _append_time_filter(filters, params, column, value, *, end=False):
+    if _is_date_only(value):
+        if end:
+            filters.append(f"{column} < (%s::date + INTERVAL '1 day')")
+        else:
+            filters.append(f"{column} >= %s::date")
+        params.append(value)
+        return
+
+    filters.append(f"{column} <= %s" if end else f"{column} >= %s")
+    params.append(value)
 
 
 def _build_where(query, extra_filters=None, extra_params=None):
     """Build (filters, params) from shared query-string filter params."""
     filters = list(extra_filters or [])
-    params  = list(extra_params  or [])
+    params = list(extra_params or [])
 
     if query.get("user_id"):
-        filters.append("user_id = %s");  params.append(query["user_id"])
+        filters.append("user_id = %s")
+        params.append(query["user_id"])
     if query.get("country"):
-        filters.append("country = %s");  params.append(query["country"])
+        filters.append("country = %s")
+        params.append(query["country"])
     if query.get("channel"):
-        filters.append("channel = %s");  params.append(query["channel"])
+        filters.append("channel = %s")
+        params.append(query["channel"])
     if query.get("is_fraud") in ("true", "1"):
         filters.append("is_fraud = TRUE")
     elif query.get("is_fraud") in ("false", "0"):
         filters.append("is_fraud = FALSE")
     if query.get("from"):
-        filters.append("processed_at >= %s"); params.append(query["from"])
+        _append_time_filter(filters, params, "processed_at", query["from"])
     if query.get("to"):
-        filters.append("processed_at <= %s"); params.append(query["to"])
+        _append_time_filter(filters, params, "processed_at", query["to"], end=True)
 
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
     return where, params
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+def _request_identity(event):
+    claims = (((event.get("requestContext") or {}).get("authorizer") or {}).get("jwt") or {}).get("claims") or {}
+    bypass = False
+
+    if not claims and _is_truthy(os.getenv("AUTH_LOCAL_BYPASS")):
+        bypass = True
+        headers = _headers(event)
+        claims = {
+            "email": headers.get("x-auth-email") or headers.get("x-cognito-email") or headers.get("email"),
+            "email_verified": headers.get("x-auth-email-verified", "true"),
+            "sub": headers.get("x-auth-sub") or headers.get("x-cognito-sub"),
+            "identities": headers.get("x-auth-identities") or "",
+        }
+
+    email = claims.get("email")
+    if not email:
+        return None, _err(401, "EMAIL_REQUIRED", "An email claim is required")
+    if not _is_truthy(claims.get("email_verified")):
+        return None, _err(403, "EMAIL_NOT_VERIFIED", "The email claim must be verified")
+
+    return {
+        "email": email,
+        "email_normalized": _normalize_email(email),
+        "cognito_sub": claims.get("sub"),
+        "identities": claims.get("identities") or "",
+        "bypass": bypass,
+    }, None
+
+
+def _auth_provider(access, identity):
+    if identity.get("bypass"):
+        return "local-bypass"
+    identities = identity.get("identities")
+    if isinstance(identities, str) and "Google" in identities:
+        return "google"
+    if isinstance(identities, list) and any(item.get("providerName") == "Google" for item in identities if isinstance(item, dict)):
+        return "google"
+    if access.get("cognito_sub"):
+        return "cognito"
+    return "cognito"
+
+
+def _get_access_row(conn, *, email_normalized):
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM dashboard_access
+            WHERE email_normalized = %s
+            FOR UPDATE
+            """,
+            (email_normalized,),
+        )
+        return cur.fetchone()
+
+
+def _touch_access_row(cur, access_id, cognito_sub=None):
+    cur.execute(
+        """
+        UPDATE dashboard_access
+        SET cognito_sub = COALESCE(%s, cognito_sub),
+            last_login_at = NOW(),
+            updated_at = NOW()
+        WHERE id = %s
+        RETURNING *
+        """,
+        (cognito_sub, access_id),
+    )
+    return cur.fetchone()
+
+
+def _authorize_access(event, *, activate_pending=False):
+    identity, error = _request_identity(event)
+    if error is not None:
+        return None, error
+
+    conn = _get_conn()
+    _ensure_schema(conn)
+
+    with conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM dashboard_access
+                WHERE email_normalized = %s
+                FOR UPDATE
+                """,
+                (identity["email_normalized"],),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None, _err(403, "DASHBOARD_ACCESS_NOT_INVITED", "This account is not invited")
+            if row["status"] == "disabled":
+                return None, _err(403, "DASHBOARD_ACCESS_DISABLED", "This account is disabled")
+
+            if row["status"] == "pending":
+                if not activate_pending:
+                    return None, _err(403, "DASHBOARD_ACCESS_PENDING", "This account is still pending activation")
+                cur.execute(
+                    """
+                    UPDATE dashboard_access
+                    SET status = 'active',
+                        activated_at = COALESCE(activated_at, NOW()),
+                        cognito_sub = COALESCE(%s, cognito_sub),
+                        last_login_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (identity["cognito_sub"], row["id"]),
+                )
+                row = cur.fetchone()
+            else:
+                row = _touch_access_row(cur, row["id"], identity["cognito_sub"])
+
+    return {"identity": identity, "access": row}, None
+
+
+def _serialize_access_profile(access, identity):
+    auth_provider = _auth_provider(access, identity)
+    return {
+        "email": access["email"],
+        "role": access["role"],
+        "status": access["status"],
+        "can_manage_invites": access["role"] == "admin",
+        "can_change_password": bool(access.get("cognito_sub")) and auth_provider == "cognito",
+        "auth_provider": auth_provider,
+        "is_bootstrap_admin": access["is_bootstrap_admin"],
+    }
+
+
+def _require_admin(access):
+    if access["role"] != "admin":
+        return _err(403, "DASHBOARD_ADMIN_REQUIRED", "Admin access required")
+    return None
+
+
+def _bootstrap_dashboard_admin(event):
+    payload = event.get("payload") or event.get("detail") or event
+    email = payload.get("email")
+    if not email:
+        return _err(400, "EMAIL_REQUIRED", "Bootstrap admin email is required")
+
+    email_normalized = _normalize_email(email)
+    display_name = payload.get("display_name")
+    cognito_sub = payload.get("cognito_sub")
+
+    conn = _get_conn()
+    _ensure_schema(conn)
+
+    with conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT email_normalized
+                FROM dashboard_access
+                WHERE is_bootstrap_admin = TRUE
+                  AND email_normalized <> %s
+                LIMIT 1
+                """,
+                (email_normalized,),
+            )
+            existing_bootstrap = cur.fetchone()
+            if existing_bootstrap is not None:
+                return _err(
+                    409,
+                    "BOOTSTRAP_ADMIN_EXISTS",
+                    "A different bootstrap admin already exists",
+                )
+
+            cur.execute(
+                """
+                INSERT INTO dashboard_access (
+                    email,
+                    email_normalized,
+                    display_name,
+                    role,
+                    status,
+                    cognito_sub,
+                    invited_by_email,
+                    is_bootstrap_admin,
+                    invited_at,
+                    activated_at,
+                    disabled_at,
+                    last_login_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    %s, %s, %s, 'admin', 'active', %s, NULL, TRUE,
+                    NOW(), NOW(), NULL, NOW(), NOW(), NOW()
+                )
+                ON CONFLICT (email_normalized) DO UPDATE SET
+                    email = EXCLUDED.email,
+                    display_name = COALESCE(EXCLUDED.display_name, dashboard_access.display_name),
+                    role = 'admin',
+                    status = 'active',
+                    cognito_sub = COALESCE(EXCLUDED.cognito_sub, dashboard_access.cognito_sub),
+                    invited_by_email = dashboard_access.invited_by_email,
+                    is_bootstrap_admin = TRUE,
+                    invited_at = COALESCE(dashboard_access.invited_at, EXCLUDED.invited_at),
+                    activated_at = COALESCE(dashboard_access.activated_at, EXCLUDED.activated_at),
+                    disabled_at = NULL,
+                    last_login_at = EXCLUDED.last_login_at,
+                    updated_at = NOW()
+                RETURNING *
+                """,
+                (email, email_normalized, display_name, cognito_sub),
+            )
+            row = cur.fetchone()
+
+    return _ok(_serialize_row(row))
+
 
 def _health():
     try:
@@ -139,7 +437,8 @@ def _get_stats(query):
     _ensure_schema(conn)
     where, params = _build_where(query)
     with conn.cursor() as cur:
-        cur.execute(f"""
+        cur.execute(
+            f"""
             SELECT
                 COUNT(*)                                        AS total,
                 COUNT(*) FILTER (WHERE is_fraud = TRUE)        AS fraud,
@@ -149,19 +448,23 @@ def _get_stats(query):
                 ROUND(AVG(fraud_score)::numeric, 4)            AS avg_fraud_score
             FROM transactions
             {where}
-        """, params)
+            """,
+            params,
+        )
         row = cur.fetchone()
     total = row[0] or 0
     fraud = row[1] or 0
-    return _ok({
-        "total":           total,
-        "fraud":           fraud,
-        "allowed":         row[2] or 0,
-        "blocked":         row[3] or 0,
-        "challenged":      row[4] or 0,
-        "fraud_rate":      round(fraud / total, 4) if total > 0 else 0.0,
-        "avg_fraud_score": float(row[5]) if row[5] is not None else None,
-    })
+    return _ok(
+        {
+            "total": total,
+            "fraud": fraud,
+            "allowed": row[2] or 0,
+            "blocked": row[3] or 0,
+            "challenged": row[4] or 0,
+            "fraud_rate": round(fraud / total, 4) if total > 0 else 0.0,
+            "avg_fraud_score": float(row[5]) if row[5] is not None else None,
+        }
+    )
 
 
 def _get_stats_timeseries(query):
@@ -172,17 +475,15 @@ def _get_stats_timeseries(query):
     if granularity not in ("hour", "day"):
         granularity = "hour"
 
-    try:
-        days = max(1, min(int(query.get("days", 1)), 90))
-    except (ValueError, TypeError):
-        days = 1
+    days = _parse_int(query.get("days"), 1, minimum=1, maximum=90)
 
     where, params = _build_where(query)
     time_clause = f"processed_at >= NOW() - INTERVAL '{days} days'"
     full_where = (where + f" AND {time_clause}") if where else f"WHERE {time_clause}"
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(f"""
+        cur.execute(
+            f"""
             SELECT
                 date_trunc('{granularity}', processed_at) AS hour,
                 COUNT(*)                                   AS total,
@@ -191,7 +492,9 @@ def _get_stats_timeseries(query):
             {full_where}
             GROUP BY 1
             ORDER BY 1
-        """, params)
+            """,
+            params,
+        )
         rows = [_serialize_row(r) for r in cur.fetchall()]
     return _ok(rows)
 
@@ -211,8 +514,8 @@ def _list_transactions(query):
     conn = _get_conn()
     _ensure_schema(conn)
 
-    limit  = min(int(query.get("limit", 20)), 100)
-    offset = max(int(query.get("offset", 0)), 0)
+    limit = _parse_int(query.get("limit"), 20, minimum=1, maximum=100)
+    offset = _parse_int(query.get("offset"), 0, minimum=0)
 
     where, params = _build_where(query)
 
@@ -235,8 +538,16 @@ def _list_transactions(query):
         )
         rows = [_serialize_row(r) for r in cur.fetchall()]
 
-    return _ok(rows, {"total": total, "limit": limit, "offset": offset,
-                      "sort_by": sort_col, "sort_order": sort_dir.lower()})
+    return _ok(
+        rows,
+        {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "sort_by": sort_col,
+            "sort_order": sort_dir.lower(),
+        },
+    )
 
 
 def _get_transaction(tx_id):
@@ -261,33 +572,32 @@ def _list_users(query):
     conn = _get_conn()
     _ensure_schema(conn)
 
-    limit  = min(int(query.get("limit", 20)), 100)
-    offset = max(int(query.get("offset", 0)), 0)
+    limit = _parse_int(query.get("limit"), 20, minimum=1, maximum=100)
+    offset = _parse_int(query.get("offset"), 0, minimum=0)
 
-    # Users don't have direct country/channel fields; filter via subquery on transactions.
-    sub_filters, sub_params = [], []
+    sub_filters = []
+    sub_params = []
     if query.get("country"):
-        sub_filters.append("country = %s"); sub_params.append(query["country"])
+        sub_filters.append("country = %s")
+        sub_params.append(query["country"])
     if query.get("channel"):
-        sub_filters.append("channel = %s"); sub_params.append(query["channel"])
+        sub_filters.append("channel = %s")
+        sub_params.append(query["channel"])
     if query.get("from"):
-        sub_filters.append("processed_at >= %s"); sub_params.append(query["from"])
+        _append_time_filter(sub_filters, sub_params, "processed_at", query["from"])
     if query.get("to"):
-        sub_filters.append("processed_at <= %s"); sub_params.append(query["to"])
+        _append_time_filter(sub_filters, sub_params, "processed_at", query["to"], end=True)
+    if query.get("user_id"):
+        sub_filters.append("user_id = %s")
+        sub_params.append(query["user_id"])
 
     sub_where = ("WHERE " + " AND ".join(sub_filters)) if sub_filters else ""
-
-    user_id_filter = ""
-    user_params = list(sub_params)
-    if query.get("user_id"):
-        user_id_filter = "AND user_id = %s"
-        user_params.append(query["user_id"])
 
     sort_col, sort_dir = _sort_clause(query, _SORTABLE_USERS, "fraud_count")
 
     count_sql = f"""
         SELECT COUNT(DISTINCT user_id) AS cnt
-        FROM transactions {sub_where} {user_id_filter}
+        FROM transactions {sub_where}
     """
     list_sql = f"""
         WITH stats AS (
@@ -302,7 +612,7 @@ def _list_users(query):
                     / NULLIF(COUNT(*), 0) * 100, 1
                 )                                                   AS fraud_rate_pct
             FROM transactions
-            {sub_where} {user_id_filter}
+            {sub_where}
             GROUP BY user_id
         )
         SELECT * FROM stats
@@ -311,13 +621,21 @@ def _list_users(query):
     """
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(count_sql, user_params)
+        cur.execute(count_sql, sub_params)
         total = cur.fetchone()["cnt"]
-        cur.execute(list_sql, user_params + [limit, offset])
+        cur.execute(list_sql, sub_params + [limit, offset])
         rows = [_serialize_row(r) for r in cur.fetchall()]
 
-    return _ok(rows, {"total": total, "limit": limit, "offset": offset,
-                      "sort_by": sort_col, "sort_order": sort_dir.lower()})
+    return _ok(
+        rows,
+        {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "sort_by": sort_col,
+            "sort_order": sort_dir.lower(),
+        },
+    )
 
 
 def _get_user(user_id):
@@ -357,18 +675,278 @@ def _get_user(user_id):
     return _ok(summary)
 
 
+def _list_dashboard_invites(access):
+    admin_error = _require_admin(access)
+    if admin_error is not None:
+        return admin_error
+
+    conn = _get_conn()
+    _ensure_schema(conn)
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM dashboard_access
+            ORDER BY created_at DESC, email_normalized ASC
+            """
+        )
+        rows = [_serialize_row(r) for r in cur.fetchall()]
+    return _ok(rows, {"total": len(rows)})
+
+
+def _upsert_dashboard_invite(access, body):
+    admin_error = _require_admin(access)
+    if admin_error is not None:
+        return admin_error
+
+    email = body.get("email")
+    if not email:
+        return _err(400, "EMAIL_REQUIRED", "Invite email is required")
+
+    email_normalized = _normalize_email(email)
+    display_name = body.get("display_name")
+
+    conn = _get_conn()
+    _ensure_schema(conn)
+
+    with conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM dashboard_access
+                WHERE email_normalized = %s
+                FOR UPDATE
+                """,
+                (email_normalized,),
+            )
+            row = cur.fetchone()
+
+            if row is None:
+                cur.execute(
+                    """
+                    INSERT INTO dashboard_access (
+                        email,
+                        email_normalized,
+                        display_name,
+                        role,
+                        status,
+                        cognito_sub,
+                        invited_by_email,
+                        is_bootstrap_admin,
+                        invited_at,
+                        activated_at,
+                        disabled_at,
+                        last_login_at,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (
+                        %s, %s, %s, 'viewer', 'pending', NULL, %s, FALSE,
+                        NOW(), NULL, NULL, NULL, NOW(), NOW()
+                    )
+                    RETURNING *
+                    """,
+                    (email, email_normalized, display_name, access["email"]),
+                )
+                row = cur.fetchone()
+            elif row["status"] == "disabled":
+                cur.execute(
+                    """
+                    UPDATE dashboard_access
+                    SET email = %s,
+                        display_name = COALESCE(%s, display_name),
+                        role = 'viewer',
+                        status = 'pending',
+                        cognito_sub = NULL,
+                        invited_by_email = %s,
+                        invited_at = NOW(),
+                        activated_at = NULL,
+                        disabled_at = NULL,
+                        last_login_at = NULL,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (email, display_name, access["email"], row["id"]),
+                )
+                row = cur.fetchone()
+            elif row["status"] == "pending":
+                cur.execute(
+                    """
+                    UPDATE dashboard_access
+                    SET email = %s,
+                        display_name = COALESCE(%s, display_name),
+                        role = 'viewer',
+                        status = 'pending',
+                        invited_by_email = %s,
+                        invited_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (email, display_name, access["email"], row["id"]),
+                )
+                row = cur.fetchone()
+            else:
+                cur.execute(
+                    """
+                    UPDATE dashboard_access
+                    SET email = %s,
+                        display_name = COALESCE(%s, display_name),
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (email, display_name, row["id"]),
+                )
+                row = cur.fetchone()
+
+    return _ok(_serialize_row(row))
+
+
+def _delete_dashboard_invite(access, invite_id):
+    admin_error = _require_admin(access)
+    if admin_error is not None:
+        return admin_error
+
+    conn = _get_conn()
+    _ensure_schema(conn)
+
+    with conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM dashboard_access
+                WHERE id = %s
+                FOR UPDATE
+                """,
+                (invite_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return _err(404, "NOT_FOUND", f"Invite '{invite_id}' not found")
+            if row["is_bootstrap_admin"]:
+                return _err(403, "CANNOT_DISABLE_BOOTSTRAP_ADMIN", "The bootstrap admin cannot be disabled")
+
+            cur.execute(
+                """
+                UPDATE dashboard_access
+                SET status = 'disabled',
+                    disabled_at = COALESCE(disabled_at, NOW()),
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (invite_id,),
+            )
+            row = cur.fetchone()
+
+    return _ok(_serialize_row(row))
+
+
+def _get_dashboard_me(access, identity):
+    return _ok(_serialize_access_profile(access, identity))
+
+
+def _change_dashboard_password(access, event):
+    body = _json_body(event)
+    if body is None:
+        return _err(400, "INVALID_JSON", "Request body must be valid JSON")
+
+    current_password = body.get("current_password")
+    new_password = body.get("new_password")
+    new_password_confirmation = body.get("new_password_confirmation")
+
+    if not current_password or not new_password or not new_password_confirmation:
+        return _err(
+            400,
+            "VALIDATION_ERROR",
+            "current_password, new_password, and new_password_confirmation are required",
+        )
+    if new_password != new_password_confirmation:
+        return _err(400, "VALIDATION_ERROR", "Password confirmation does not match")
+    if not access.get("cognito_sub"):
+        return _err(403, "PASSWORD_CHANGE_UNAVAILABLE", "Password changes require a Cognito account")
+
+    headers = _headers(event)
+    access_token = headers.get("x-cognito-access-token")
+    if not access_token:
+        return _err(401, "ACCESS_TOKEN_REQUIRED", "X-Cognito-Access-Token is required")
+
+    client = boto3.client("cognito-idp", region_name=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"))
+
+    try:
+        cognito_user = client.get_user(AccessToken=access_token)
+        token_sub = None
+        for attr in cognito_user.get("UserAttributes", []):
+            if attr.get("Name") == "sub":
+                token_sub = attr.get("Value")
+                break
+        if token_sub and access.get("cognito_sub") and token_sub != access.get("cognito_sub"):
+            return _err(403, "TOKEN_SUB_MISMATCH", "The access token does not match the current dashboard user")
+        client.change_password(
+            AccessToken=access_token,
+            PreviousPassword=current_password,
+            ProposedPassword=new_password,
+        )
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "ClientError")
+        if error_code == "NotAuthorizedException":
+            return _err(403, "INVALID_CURRENT_PASSWORD", "The current password is invalid")
+        if error_code == "InvalidPasswordException":
+            return _err(400, "WEAK_PASSWORD", "The new password does not satisfy the password policy")
+        if error_code == "LimitExceededException":
+            return _err(429, "PASSWORD_CHANGE_THROTTLED", "Password changes are temporarily throttled")
+        if error_code == "InvalidParameterException":
+            return _err(400, "INVALID_PASSWORD_REQUEST", "The password change request is invalid")
+        return _err(502, "AUTH_PROVIDER_ERROR", "Password change failed")
+
+    return _ok({"status": "changed"})
+
+
 # ── Router ────────────────────────────────────────────────────────────────────
 
 def handler(event, context):
-    path        = event.get("rawPath", "")
-    query       = event.get("queryStringParameters") or {}
+    if event.get("action") == "bootstrap_dashboard_admin":
+        return _bootstrap_dashboard_admin(event)
+
+    path = event.get("rawPath", "")
+    query = event.get("queryStringParameters") or {}
     path_params = event.get("pathParameters") or {}
+    method = ((event.get("requestContext") or {}).get("http") or {}).get("method", "")
 
     logger.info(json.dumps({"action": "api_request", "path": path, "query": query}))
 
     try:
         if path == "/health":
             return _health()
+
+        protected_access = None
+        protected_identity = None
+
+        if path != "/health":
+            auth_result, auth_error = _authorize_access(event, activate_pending=(path == "/dashboard/me"))
+            if auth_error is not None:
+                return auth_error
+            protected_identity = auth_result["identity"]
+            protected_access = auth_result["access"]
+
+        if path == "/dashboard/me":
+            return _get_dashboard_me(protected_access, protected_identity)
+        if path == "/dashboard/me/password" and method == "PUT":
+            return _change_dashboard_password(protected_access, event)
+        if path == "/dashboard/invites" and method == "GET":
+            return _list_dashboard_invites(protected_access)
+        if path == "/dashboard/invites" and method == "POST":
+            body = _json_body(event)
+            if body is None:
+                return _err(400, "INVALID_JSON", "Request body must be valid JSON")
+            return _upsert_dashboard_invite(protected_access, body)
+        if path.startswith("/dashboard/invites/") and path_params.get("id") and method == "DELETE":
+            return _delete_dashboard_invite(protected_access, path_params["id"])
+
         if path == "/stats":
             return _get_stats(query)
         if path == "/stats/timeseries":

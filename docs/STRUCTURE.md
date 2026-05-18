@@ -3,6 +3,7 @@
 ```
 .
 ├── AGENTS.md
+├── CONTEXT.md
 ├── CONTRIBUTING.md
 ├── README.md
 ├── Makefile
@@ -23,8 +24,10 @@
 │   ├── NAMING.md
 │   ├── WORKFLOW.md
 │   ├── SECURITY.md
-│   └── CONSIGNA.md
+│   ├── CONSIGNA.md
+│   └── adr/
 ├── modules/
+│   ├── auth/             # Cognito User Pool, Hosted UI domain, optional Google IdP
 │   ├── network/          # VPC, subnets, VGW, VPC Endpoints (S3, DynamoDB, SQS, ECR, Logs, SNS)
 │   ├── queue/            # SQS transaction queue + DLQ (ingestion side)
 │   ├── data_store/       # DynamoDB user-behavior table + RDS PostgreSQL fraud results
@@ -32,7 +35,7 @@
 │   ├── onprem_sim/       # On-prem VPC simulation: strongSwan EC2, CGW, Site-to-Site VPN
 │   ├── notification/     # SNS results topic + optional email subscription (fan-out hub)
 │   ├── results_writer/   # SQS results queue + Lambda writer (SNS → SQS → Lambda → RDS)
-│   └── api/              # Lambda + HTTP API Gateway (dashboard: GET /transactions)
+│   └── api/              # Lambda + HTTP API Gateway (Cognito-protected dashboard API)
 │       ├── main.tf
 │       ├── variables.tf
 │       ├── outputs.tf
@@ -52,6 +55,8 @@
 - **`modules/`** contains reusable building blocks. A module = one logical unit of infrastructure.
 - Every module has its own `README.md` documenting inputs, outputs, and example usage.
 - Every module has a `versions.tf` pinning Terraform and provider versions.
+- `CONTEXT.md` defines domain language used by auth and dashboard access-control work.
+- `docs/adr/` records architecture decisions that are costly or surprising to reverse.
 - Keep root resource declarations to a minimum: prefer composing modules over inlining resources.
 - `app/` holds the small lab services and Dockerfiles. Keep `app/net` out of cloud deployment; only `app/net/serving/go` is part of the processor build context. Only Docker images consumed by Fargate are pushed to ECR.
 - `scripts/` holds helper shell scripts, bootstrap files, or templates referenced from Terraform. Treat them as code: review them, keep them small.

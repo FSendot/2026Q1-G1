@@ -6,13 +6,11 @@ provider "aws" {
   }
 }
 
-data "aws_caller_identity" "current" {}
-
-data "aws_region" "current" {}
-
 data "aws_availability_zones" "available" {
   state = "available"
 }
+
+data "aws_region" "current" {}
 
 # AWS Academy expone un rol pre-creado (LabRole). Esta data source lo
 # resuelve para reutilizarlo como task_role y execution_role en ECS,
@@ -34,6 +32,10 @@ locals {
   # Primeras dos AZs de la región (orden estable, conocido en plan) para
   # evitar count/for_each que dependan de random_shuffle.
   azs = slice(data.aws_availability_zones.available.names, 0, 2)
+
+  dashboard_app_url       = format("https://%s-dashboard.s3.%s.amazonaws.com/index.html", local.project, data.aws_region.current.name)
+  dashboard_callback_urls = [local.dashboard_app_url, "http://localhost:3000/"]
+  dashboard_logout_urls   = [local.dashboard_app_url, "http://localhost:3000/"]
 }
 
 module "network" {
@@ -139,6 +141,17 @@ module "results_writer" {
   tags                       = local.common_tags
 }
 
+module "auth" {
+  source = "./modules/auth"
+
+  project                    = local.project
+  tags                       = local.common_tags
+  callback_urls              = local.dashboard_callback_urls
+  logout_urls                = local.dashboard_logout_urls
+  google_oauth_client_id     = var.google_oauth_client_id
+  google_oauth_client_secret = var.google_oauth_client_secret
+}
+
 module "api" {
   source = "./modules/api"
 
@@ -153,15 +166,24 @@ module "api" {
   db_name                    = module.data_store.db_name
   db_username                = module.data_store.db_username
   db_password                = random_password.db.result
+  jwt_issuer                 = module.auth.issuer
+  jwt_audience               = module.auth.client_id
   tags                       = local.common_tags
 }
 
 module "dashboard" {
   source = "./modules/dashboard"
 
-  project      = local.project
-  api_endpoint = module.api.api_endpoint
-  tags         = local.common_tags
+  project                    = local.project
+  api_endpoint               = module.api.api_endpoint
+  cognito_user_pool_id       = module.auth.user_pool_id
+  cognito_client_id          = module.auth.client_id
+  cognito_domain_url         = module.auth.domain_url
+  cognito_hosted_ui_base_url = module.auth.hosted_ui_base_url
+  cognito_issuer             = module.auth.issuer
+  cognito_redirect_uri       = local.dashboard_app_url
+  cognito_logout_uri         = local.dashboard_app_url
+  tags                       = local.common_tags
 }
 
 # Proxy ↔ RDS

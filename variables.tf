@@ -75,3 +75,21 @@ variable "alert_email" {
     error_message = "alert_email debe ser una dirección de correo válida o quedar vacío."
   }
 }
+
+variable "google_oauth_client_id" {
+  description = "Client ID de Google OAuth para habilitar el IdP opcional en Cognito. Dejar vacío deshabilita Google."
+  type        = string
+  default     = ""
+}
+
+variable "google_oauth_client_secret" {
+  description = "Client secret de Google OAuth para habilitar el IdP opcional en Cognito. Dejar vacío deshabilita Google."
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition     = (var.google_oauth_client_id == "" && var.google_oauth_client_secret == "") || (var.google_oauth_client_id != "" && var.google_oauth_client_secret != "")
+    error_message = "google_oauth_client_id y google_oauth_client_secret deben establecerse juntos o quedar ambos vacíos."
+  }
+}

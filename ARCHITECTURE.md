@@ -22,7 +22,7 @@ Hard constraints driving the design:
 | -------------------------------------- | ------------------ | --------- | -------------------------------------------------------------------------------------------------------------- |
 | VPC, private subnets, VGW, default SG  | `modules/network`  | external + custom | Wraps `terraform-aws-modules/vpc/aws ~> 5.13`. No NAT, no IGW.                                          |
 | Gateway VPC Endpoints (S3, DynamoDB)   | `modules/network`  | custom    | Attached to all private route tables.                                                                          |
-| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs, SNS) | `modules/network` | custom | One shared SG (`<project>-endpoints-sg`) accepts HTTPS only from the VPC CIDR. SNS endpoint added to allow Fargate and Lambda to publish without a NAT gateway. |
+| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs, SNS, Secrets Manager, Cognito IDP) | `modules/network` | custom | One shared SG (`<project>-endpoints-sg`) accepts HTTPS only from the VPC CIDR. Cognito IDP is used by the private API Lambda for password changes without a NAT gateway. |
 | SQS main queue + DLQ + redrive         | `modules/queue`      | custom    | `maxReceiveCount = 5`. SSE-SQS. Queue policy restricted to LabRole.                                            |
 | DynamoDB `user_behavior` table         | `modules/data_store` | custom    | PK `user_id` (string), `PAY_PER_REQUEST`, SSE on, PITR on. Input to scoring.                                   |
 | RDS PostgreSQL `fraud_results` DB      | `modules/data_store` | custom    | PostgreSQL 17.4, `db.t3.micro`, private subnets, encrypted. Output of scoring. Single-AZ lab configuration.    |

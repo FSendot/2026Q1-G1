@@ -26,10 +26,13 @@ DB_SSLMODE = os.environ.get("DB_SSLMODE", "require")
 
 # Datos de ejemplo si RDS no está configurado
 _MOCK_STATS = {
-    "total_transactions": 12847,
+    "total": 12847,
+    "fraud": 626,
     "allowed": 11200,
-    "challenge": 1021,
+    "challenged": 1021,
     "blocked": 626,
+    "fraud_rate": 0.0487,
+    "avg_fraud_score": 0.41,
 }
 
 _MOCK_TRANSACTIONS = [
@@ -39,8 +42,9 @@ _MOCK_TRANSACTIONS = [
         "amount": 15000.0,
         "currency": "ARS",
         "country": "BR",
-        "score": 85,
-        "decision": "blocked",
+        "channel": "web",
+        "fraud_score": 0.85,
+        "decision": "block",
         "processed_at": "2026-04-03T10:22:00.123Z",
     },
     {
@@ -49,8 +53,9 @@ _MOCK_TRANSACTIONS = [
         "amount": 3200.0,
         "currency": "ARS",
         "country": "AR",
-        "score": 35,
-        "decision": "allowed",
+        "channel": "mobile",
+        "fraud_score": 0.35,
+        "decision": "allow",
         "processed_at": "2026-04-03T10:25:11.000Z",
     },
     {
@@ -59,7 +64,8 @@ _MOCK_TRANSACTIONS = [
         "amount": 8900.0,
         "currency": "ARS",
         "country": "UY",
-        "score": 55,
+        "channel": "atm",
+        "fraud_score": 0.55,
         "decision": "challenge",
         "processed_at": "2026-04-03T10:28:44.500Z",
     },
@@ -67,8 +73,8 @@ _MOCK_TRANSACTIONS = [
 
 _CORS_HEADERS = [
     ("Access-Control-Allow-Origin", "*"),
-    ("Access-Control-Allow-Methods", "GET, OPTIONS"),
-    ("Access-Control-Allow-Headers", "Content-Type, Accept"),
+    ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"),
+    ("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-Cognito-Access-Token"),
 ]
 
 _SQL_STATS = """
@@ -180,6 +186,36 @@ def _json_response(
     return [body]
 
 
+def _ok(data, meta=None):
+    body = {"data": data}
+    if meta is not None:
+        body["meta"] = meta
+    return body
+
+
+def _mock_user_rows():
+    grouped = {}
+    for tx in _MOCK_TRANSACTIONS:
+        user = grouped.setdefault(
+            tx["user_id"],
+            {
+                "user_id": tx["user_id"],
+                "total_transactions": 0,
+                "fraud_count": 0,
+                "avg_fraud_score": 0.0,
+                "last_seen": tx["processed_at"],
+            },
+        )
+        user["total_transactions"] += 1
+        user["fraud_count"] += 1 if tx["decision"] == "block" else 0
+        user["avg_fraud_score"] += tx["fraud_score"]
+        user["last_seen"] = max(user["last_seen"], tx["processed_at"])
+    for user in grouped.values():
+        user["avg_fraud_score"] = user["avg_fraud_score"] / max(user["total_transactions"], 1)
+        user["fraud_rate_pct"] = round(user["fraud_count"] / max(user["total_transactions"], 1) * 100, 1)
+    return list(grouped.values())
+
+
 def application(environ, start_response):
     method = environ.get("REQUEST_METHOD", "GET")
     path = environ.get("PATH_INFO") or "/"
@@ -189,7 +225,7 @@ def application(environ, start_response):
         start_response("204 No Content", _CORS_HEADERS)
         return [b""]
 
-    if method != "GET":
+    if method not in ("GET", "POST", "PUT", "DELETE"):
         return _json_response(
             start_response,
             "405 Method Not Allowed",
@@ -198,7 +234,53 @@ def application(environ, start_response):
 
     # "/" responde OK: muchos health checks (ALB/ELB) usan GET / por defecto.
     if path in ("/", "/health"):
-        return _json_response(start_response, "200 OK", {"status": "ok"})
+        return _json_response(start_response, "200 OK", _ok({"status": "ok"}))
+
+    if path == "/dashboard/me":
+        return _json_response(
+            start_response,
+            "200 OK",
+            _ok({
+                "email": "local@example.test",
+                "role": "admin",
+                "status": "active",
+                "can_manage_invites": True,
+                "can_change_password": False,
+                "auth_provider": "local-bypass",
+                "is_bootstrap_admin": True,
+            }),
+        )
+
+    if path == "/dashboard/invites":
+        if method == "POST":
+            return _json_response(
+                start_response,
+                "200 OK",
+                _ok({
+                    "id": "local-invite",
+                    "email": "local-invite@example.test",
+                    "role": "viewer",
+                    "status": "pending",
+                    "is_bootstrap_admin": False,
+                }),
+            )
+        return _json_response(start_response, "200 OK", _ok([], {"total": 0}))
+
+    if path.startswith("/dashboard/invites/") and method == "DELETE":
+        return _json_response(start_response, "200 OK", _ok({"status": "disabled"}))
+
+    if path == "/filters":
+        return _json_response(
+            start_response,
+            "200 OK",
+            _ok({
+                "countries": sorted({tx["country"] for tx in _MOCK_TRANSACTIONS}),
+                "channels": sorted({tx["channel"] for tx in _MOCK_TRANSACTIONS}),
+            }),
+        )
+
+    if path == "/stats/timeseries":
+        return _json_response(start_response, "200 OK", _ok([]))
 
     if path in ("/stats", "/api/stats"):
         if _db_env_configured():
@@ -219,8 +301,16 @@ def application(environ, start_response):
                     "503 Service Unavailable",
                     {"error": "database_error", "detail": str(e)},
                 )
-            return _json_response(start_response, "200 OK", stats)
-        return _json_response(start_response, "200 OK", _MOCK_STATS)
+            return _json_response(start_response, "200 OK", _ok({
+                "total": stats["total_transactions"],
+                "fraud": stats["blocked"],
+                "allowed": stats["allowed"],
+                "blocked": stats["blocked"],
+                "challenged": stats["challenge"],
+                "fraud_rate": round(stats["blocked"] / max(stats["total_transactions"], 1), 4),
+                "avg_fraud_score": None,
+            }))
+        return _json_response(start_response, "200 OK", _ok(_MOCK_STATS))
 
     if path in ("/transactions", "/api/transactions"):
         qs = parse_qs(query)
@@ -248,12 +338,16 @@ def application(environ, start_response):
                     "503 Service Unavailable",
                     {"error": "database_error", "detail": str(e)},
                 )
-            return _json_response(start_response, "200 OK", {"items": items})
+            return _json_response(start_response, "200 OK", _ok(items, {"total": len(items), "limit": limit, "offset": 0}))
         return _json_response(
             start_response,
             "200 OK",
-            {"items": _MOCK_TRANSACTIONS[:limit]},
+            _ok(_MOCK_TRANSACTIONS[:limit], {"total": len(_MOCK_TRANSACTIONS), "limit": limit, "offset": 0}),
         )
+
+    if path == "/users":
+        rows = _mock_user_rows()
+        return _json_response(start_response, "200 OK", _ok(rows, {"total": len(rows), "limit": len(rows), "offset": 0}))
 
     if path in ("/version", "/api/version"):
         return _json_response(

@@ -1,6 +1,6 @@
 # `modules/dashboard`
 
-Provisions the S3 static website bucket used by the fraud dashboard. Terraform owns the bucket, website configuration, public-read policy for the lab, bootstrap object keys, and outputs. CI builds `app/dashboard/Dockerfile` and syncs the exported files to this Terraform-created bucket.
+Provisions the S3 static website bucket used by the fraud dashboard. Terraform owns the bucket, website configuration, public-read policy for the lab, bootstrap object keys, and outputs. CI builds `app/dashboard/Dockerfile` and syncs the exported files to this Terraform-created bucket. The bootstrap `config.js` now also carries Cognito settings for the dashboard auth slice.
 
 ## Resources
 
@@ -16,6 +16,13 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 | --------- | ------------- | ------- | ------------------------------------------------ |
 | `project` | `string`      | n/a     | Prefix for the dashboard bucket name.            |
 | `api_endpoint` | `string` | n/a | API Gateway endpoint used for the bootstrap `config.js`. |
+| `cognito_user_pool_id` | `string` | n/a | Cognito user pool ID written into `config.js`. |
+| `cognito_client_id` | `string` | n/a | Cognito app client ID written into `config.js`. |
+| `cognito_domain_url` | `string` | n/a | Cognito managed domain URL written into `config.js`. |
+| `cognito_hosted_ui_base_url` | `string` | n/a | Cognito Hosted UI authorize URL written into `config.js`. |
+| `cognito_issuer` | `string` | n/a | Cognito issuer URL written into `config.js`. |
+| `cognito_redirect_uri` | `string` | n/a | Cognito callback URL written into `config.js`. |
+| `cognito_logout_uri` | `string` | n/a | Cognito logout URL written into `config.js`. |
 | `tags`    | `map(string)` | `{}`    | Common tags merged with `Component = "dashboard"`. |
 
 ## Outputs
@@ -23,6 +30,7 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 | Name          | Description                                      |
 | ------------- | ------------------------------------------------ |
 | `website_url` | S3 website endpoint URL for the dashboard.       |
+| `https_index_url` | HTTPS S3 object URL for `index.html`, used by Cognito callback/logout. |
 | `bucket_name` | Bucket name where CI syncs the frontend export.  |
 
 ## Deployment
@@ -34,6 +42,12 @@ docker build \
   -f app/dashboard/Dockerfile \
   --target export \
   --build-arg "API_BASE=$(terraform output -raw api_endpoint)" \
+  --build-arg "COGNITO_CLIENT_ID=$(terraform output -raw cognito_client_id)" \
+  --build-arg "COGNITO_DOMAIN=$(terraform output -raw cognito_domain_url)" \
+  --build-arg "COGNITO_REDIRECT_URI=$(terraform output -raw dashboard_app_url)" \
+  --build-arg "COGNITO_LOGOUT_URI=$(terraform output -raw dashboard_app_url)" \
+  --build-arg "COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id)" \
+  --build-arg "COGNITO_ISSUER=$(terraform output -raw cognito_issuer)" \
   --output type=local,dest=dashboard-dist \
   app
 

@@ -1,3 +1,5 @@
+data "aws_region" "current" {}
+
 locals {
   module_tags = merge(var.tags, {
     Component = "dashboard"
@@ -76,9 +78,18 @@ resource "aws_s3_object" "app_js" {
 }
 
 resource "aws_s3_object" "config_js" {
-  bucket       = aws_s3_bucket.dashboard.id
-  key          = "config.js"
-  content      = templatefile("${path.module}/config.js.tpl", { api_endpoint = var.api_endpoint })
+  bucket = aws_s3_bucket.dashboard.id
+  key    = "config.js"
+  content = templatefile("${path.module}/config.js.tpl", {
+    api_endpoint               = var.api_endpoint
+    cognito_user_pool_id       = var.cognito_user_pool_id
+    cognito_client_id          = var.cognito_client_id
+    cognito_domain_url         = var.cognito_domain_url
+    cognito_hosted_ui_base_url = var.cognito_hosted_ui_base_url
+    cognito_issuer             = var.cognito_issuer
+    cognito_redirect_uri       = var.cognito_redirect_uri
+    cognito_logout_uri         = var.cognito_logout_uri
+  })
   content_type = "application/javascript"
 
   tags = local.module_tags

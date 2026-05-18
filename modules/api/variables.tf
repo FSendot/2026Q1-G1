@@ -78,6 +78,26 @@ variable "db_password" {
   sensitive   = true
 }
 
+variable "jwt_issuer" {
+  description = "Issuer del JWT de Cognito usado por el authorizer HTTP API."
+  type        = string
+
+  validation {
+    condition     = can(regex("^https://", var.jwt_issuer))
+    error_message = "jwt_issuer debe ser una URL HTTPS válida."
+  }
+}
+
+variable "jwt_audience" {
+  description = "Audience del JWT de Cognito usado por el authorizer HTTP API."
+  type        = string
+
+  validation {
+    condition     = length(var.jwt_audience) > 0
+    error_message = "jwt_audience no puede quedar vacío."
+  }
+}
+
 variable "log_retention_days" {
   description = "Días de retención de los logs en CloudWatch Logs."
   type        = number

@@ -83,6 +83,36 @@ output "results_dlq_arn" {
   value       = module.results_writer.dlq_arn
 }
 
+output "cognito_user_pool_id" {
+  description = "ID del Cognito User Pool que autentica el dashboard."
+  value       = module.auth.user_pool_id
+}
+
+output "cognito_client_id" {
+  description = "ID del Cognito app client público usado por el dashboard."
+  value       = module.auth.client_id
+}
+
+output "cognito_domain_url" {
+  description = "URL del dominio administrado de Cognito."
+  value       = module.auth.domain_url
+}
+
+output "cognito_hosted_ui_base_url" {
+  description = "URL base del Hosted UI de Cognito."
+  value       = module.auth.hosted_ui_base_url
+}
+
+output "cognito_issuer" {
+  description = "Issuer del token JWT de Cognito usado por el authorizer del API Gateway."
+  value       = module.auth.issuer
+}
+
+output "dashboard_app_url" {
+  description = "URL HTTPS del objeto index.html del dashboard, registrada como callback/logout en Cognito."
+  value       = local.dashboard_app_url
+}
+
 output "db_endpoint" {
   description = "Endpoint completo de la instancia RDS (host:port)."
   value       = module.data_store.db_endpoint
@@ -105,8 +135,13 @@ output "proxy_endpoint" {
 }
 
 output "dashboard_url" {
-  description = "URL del dashboard (S3 static website). Credenciales demo: cloud / cloud."
+  description = "URL HTTP del dashboard (S3 static website endpoint). Para Cognito usar dashboard_app_url."
   value       = module.dashboard.website_url
+}
+
+output "dashboard_https_index_url" {
+  description = "URL HTTPS del objeto index.html del dashboard."
+  value       = module.dashboard.https_index_url
 }
 
 output "dashboard_bucket_name" {
