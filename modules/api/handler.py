@@ -23,6 +23,26 @@ HEADERS = {
 
 _conn = None
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SORTABLE_TX = {
+    "transaction_id": "transaction_id",
+    "user_id": "user_id",
+    "amount": "amount",
+    "currency": "currency",
+    "country": "country",
+    "channel": "channel",
+    "fraud_score": "fraud_score",
+    "is_fraud": "is_fraud",
+    "decision": "decision",
+    "processed_at": "processed_at",
+}
+_SORTABLE_USERS = {
+    "user_id": "user_id",
+    "total_transactions": "total_transactions",
+    "fraud_count": "fraud_count",
+    "avg_fraud_score": "avg_fraud_score",
+    "last_seen": "last_seen",
+    "fraud_rate_pct": "fraud_rate_pct",
+}
 
 
 def _get_conn():
@@ -211,6 +231,16 @@ def _build_where(query, extra_filters=None, extra_params=None):
 
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
     return where, params
+
+
+def _sort_clause(query, sortable_columns, default_column):
+    sort_by = query.get("sort_by")
+    sort_col = sortable_columns.get(sort_by, sortable_columns[default_column])
+
+    sort_order = str(query.get("sort_order", "desc")).lower()
+    sort_dir = "ASC" if sort_order == "asc" else "DESC"
+
+    return sort_col, sort_dir
 
 
 def _request_identity(event):
