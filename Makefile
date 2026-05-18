@@ -7,27 +7,33 @@ MODEL_PREP_FALLBACK_FILE_URL := https://drive.google.com/file/d/1Gut3LFjfYVpIEHJ
 MODEL_PREP_FALLBACK_URL := https://drive.google.com/drive/folders/1DfGgK6dTXP-IS3bdqSl_kBCIkr6P9NR6?usp=sharing
 
 LAMBDA_WRITER ?= itba-tp-fraud-results-writer
+ONPREM_STACK  ?= itba-tp-fraud-onprem-strongswan
+LOG_GROUP     ?= /ecs/itba-tp-fraud-fraud-engine
 REGION        ?= us-east-1
 COUNT         ?= 1000
 DAYS          ?= 30
+TX_COUNT      ?= 50
+FRAUD_PCT     ?= 20
 PYTHON        ?= $(shell which python3)
 
-.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep seed
+.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep seed send-test-tx logs
 
 help:
 	@echo "Targets:"
-	@echo "  make fmt           Format all Terraform files (in-place)"
-	@echo "  make fmt-check     Check formatting without modifying files (for CI)"
-	@echo "  make validate      Validate all Terraform files"
-	@echo "  make lint          Run checkov (Terraform)"
-	@echo "  make build-layers  Build psycopg2 Lambda layer (required before first plan)"
-	@echo "  make prepare-model Prepare app/processor/model/runtime_spec.json for container builds"
-	@echo "  make init          Initialize the working directory"
-	@echo "  make plan          Plan (writes tfplan)"
-	@echo "  make apply         Apply the saved plan"
-	@echo "  make destroy       Destroy all managed infrastructure"
-	@echo "  make clean         Remove .terraform/ and tfplan files"
-	@echo "  make seed          Seed RDS with ~COUNT mock transactions (default COUNT=1000, DAYS=30)"
+	@echo "  make fmt              Format all Terraform files (in-place)"
+	@echo "  make fmt-check        Check formatting without modifying files (for CI)"
+	@echo "  make validate         Validate all Terraform files"
+	@echo "  make lint             Run checkov (Terraform)"
+	@echo "  make build-layers     Build psycopg2 Lambda layer (required before first plan)"
+	@echo "  make prepare-model    Prepare app/processor/model/runtime_spec.json for container builds"
+	@echo "  make init             Initialize the working directory"
+	@echo "  make plan             Plan (writes tfplan)"
+	@echo "  make apply            Apply the saved plan"
+	@echo "  make destroy          Destroy all managed infrastructure"
+	@echo "  make clean            Remove .terraform/ and tfplan files"
+	@echo "  make seed             Seed RDS with ~COUNT mock transactions (default COUNT=1000, DAYS=30)"
+	@echo "  make send-test-tx     Send TX_COUNT real transactions via on-prem EC2 → VPN → SQS (default TX_COUNT=5, FRAUD_PCT=20)"
+	@echo "  make logs             Tail Fargate worker logs in real time (Ctrl+C to stop)"
 
 fmt:
 	terraform fmt -recursive
@@ -102,3 +108,13 @@ seed:
 	  --region $(REGION) \
 	  --count $(COUNT) \
 	  --days $(DAYS)
+
+send-test-tx:
+	$(PYTHON) scripts/send_test_transactions.py \
+	  --stack $(ONPREM_STACK) \
+	  --region $(REGION) \
+	  --count $(TX_COUNT) \
+	  --fraud-pct $(FRAUD_PCT)
+
+logs:
+	aws logs tail $(LOG_GROUP) --follow --region $(REGION)
