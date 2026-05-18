@@ -90,9 +90,9 @@ Provisiona la VPC privada que aloja toda la infraestructura. No tiene NAT Gatewa
 
 ### `modules/queue`
 
-Cola SQS de ingesta de transacciones con Dead Letter Queue. Solo acepta mensajes cuya IP de origen esté dentro del CIDR on-prem (`192.168.0.0/16`), implementado mediante una política `Deny` con la condición `aws:VpcSourceIp`. Esto garantiza que únicamente el sitio on-prem puede producir mensajes.
+Cola SQS de ingesta de transacciones con Dead Letter Queue. El acceso está restringido al rol IAM `LabRole` (único principal autorizado para `SendMessage`/`ReceiveMessage`) y se deniega cualquier tráfico no cifrado (`aws:SecureTransport = false`). La restricción de red queda garantizada arquitecturalmente por la combinación VPN Site-to-Site + Interface VPC Endpoint: el endpoint SQS solo es alcanzable desde dentro de la VPC, y la VPN es el único camino desde el on-prem hasta ella. Se intentó agregar un `Deny` explícito por CIDR/VPC mediante `aws:VpcSourceIp` y `aws:SourceVpc`, pero estas condition keys no se propagan para tráfico cross-VPC vía VPN hacia Interface Endpoints.
 
-**Recursos:** [`aws_sqs_queue.main`](modules/queue/main.tf#L31) + [`aws_sqs_queue.dlq`](modules/queue/main.tf#L10), [`aws_sqs_queue_redrive_allow_policy.dlq`](modules/queue/main.tf#L22), [`aws_sqs_queue_policy.main`](modules/queue/main.tf#L116) y [`aws_sqs_queue_policy.dlq`](modules/queue/main.tf#L161)
+**Recursos:** [`aws_sqs_queue.main`](modules/queue/main.tf#L31) + [`aws_sqs_queue.dlq`](modules/queue/main.tf#L10), [`aws_sqs_queue_redrive_allow_policy.dlq`](modules/queue/main.tf#L22), [`aws_sqs_queue_policy.main`](modules/queue/main.tf#L98) y [`aws_sqs_queue_policy.dlq`](modules/queue/main.tf#L143)
 
 ---
 
@@ -281,67 +281,35 @@ Outputs relevantes:
 
 ## Probar el flujo completo
 
-El flujo completo simula una transacción que llega desde el sitio on-prem, es evaluada por el motor de fraude y aparece en el dashboard.
+El flujo completo envía transacciones desde el on-prem simulado (EC2 strongSwan vía SSM), las procesa el motor de fraude en Fargate, y los resultados aparecen en el dashboard.
 
-### Paso 1 — Conectarse al on-prem simulado
-
-El on-prem está implementado como una EC2 con strongSwan en la VPC `192.168.0.0/16`. Solo desde esa red puede enviarse mensajes al SQS de ingesta (el queue policy lo enforce con `aws:VpcSourceIp`).
+### Paso 1 — Enviar transacciones de prueba
 
 ```bash
-# Obtener la IP pública del router on-prem
-terraform output -raw vpn_gateway_public_ip
+make send-test-tx
 ```
+
+Por default envía 50 transacciones con 20% de fraude. Se puede ajustar:
 
 ```bash
-# SSH con el PEM del lab (el usuario varía según la AMI: ec2-user o ubuntu)
-ssh -i labsuser.pem ec2-user@<ip_del_output>
+make send-test-tx TX_COUNT=100 FRAUD_PCT=30
 ```
 
-### Paso 2 — Enviar una transacción desde on-prem
+El script obtiene automáticamente el instance ID del EC2 on-prem desde CloudFormation y la queue URL desde el output de Terraform, construye un script bash y lo ejecuta en el EC2 vía SSM (`AWS-RunShellScript`). El tráfico SQS viaja por el túnel VPN hacia el Interface VPC Endpoint, sin salir a internet.
 
-Una vez dentro del EC2:
+Cada transacción incluye features de ML pre-computados (card/addr/velocity/identity signals) para que el modelo pueda diferenciar fraude de transacciones legítimas:
+- **Normal**: misma cuenta/país, dispositivo estable, 8+ horas entre transacciones → ~9% fraud score → Permitida
+- **Fraude**: country shift, destination shift, device/identity shift, 18 segundos entre transacciones, v-features altos → ~26% fraud score → Bloqueada
+
+### Paso 2 — Ver los logs en tiempo real
 
 ```bash
-# Configurar credenciales del lab (las mismas de tu sesión Academy)
-aws configure set aws_access_key_id     <AWS_ACCESS_KEY_ID>
-aws configure set aws_secret_access_key <AWS_SECRET_ACCESS_KEY>
-aws configure set aws_session_token     <AWS_SESSION_TOKEN>
-aws configure set region us-east-1
-
-# Enviar transacción al SQS de ingesta
-aws sqs send-message \
-  --queue-url "<queue_url del output>" \
-  --message-body '{
-    "transaction_id": "demo-001",
-    "user_id":        "user-123",
-    "amount":         15000.00,
-    "currency":       "USD",
-    "country":        "BR",
-    "channel":        "online",
-    "destination_account": "acc-999",
-    "timestamp":      "2026-05-17T10:00:00Z"
-  }' \
-  --region us-east-1
+make logs
 ```
 
-### Paso 3 — Verificar el procesamiento en Fargate
+Muestra los logs de Fargate en tiempo real con `fraud_score` e `is_fraud` por transacción.
 
-```bash
-# Desde tu máquina local (no el EC2)
-aws logs tail "/ecs/itba-tp-fraud-fraud-engine" --since 5m --region us-east-1
-```
-
-Deberías ver logs del scoring con `fraud_score` y `is_fraud`.
-
-### Paso 4 — Verificar que la Lambda escribió en RDS
-
-```bash
-aws logs tail "/aws/lambda/itba-tp-fraud-results-writer" --since 5m --region us-east-1
-```
-
-Deberías ver: `"action": "fraud_result_stored", "transaction_id": "demo-001"`.
-
-### Paso 5 — Ver el resultado en el dashboard
+### Paso 3 — Ver el resultado en el dashboard
 
 ```bash
 terraform output -raw dashboard_url
@@ -353,8 +321,6 @@ Abrir esa URL en el browser. Ingresar con:
 |-------|-------|
 | Usuario | `cloud` |
 | Contraseña | `cloud` |
-
-La transacción `demo-001` debería aparecer en la tabla con su score y decisión.
 
 ---
 
@@ -420,7 +386,7 @@ Los secrets necesarios en GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, 
 ├── versions.tf              # Versiones de Terraform y providers
 ├── backend.tf               # Backend S3 (partial config, bucket se pasa en init)
 ├── terraform.tfvars.example # Plantilla de configuración
-├── Makefile                 # Targets: init, plan, apply, destroy, build-layers
+├── Makefile                 # Targets: init, plan, apply, destroy, build-layers, seed, send-test-tx, logs
 ├── modules/
 │   ├── network/             # VPC, subnets, VPN Gateway, VPC Endpoints
 │   ├── queue/               # SQS ingesta + DLQ + CIDR lock on-prem
