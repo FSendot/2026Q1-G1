@@ -1,11 +1,12 @@
 data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
 
 locals {
   module_tags = merge(var.tags, {
     Component = "dashboard"
   })
 
-  bucket_name = format("%s-dashboard", var.project)
+  bucket_name = format("%s-dashboard-%s", var.project, data.aws_caller_identity.current.account_id)
 }
 
 resource "aws_s3_bucket" "dashboard" {

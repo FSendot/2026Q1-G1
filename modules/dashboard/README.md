@@ -4,7 +4,7 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 
 ## Resources
 
-- `aws_s3_bucket.dashboard` — `<project>-dashboard`, force-destroy enabled for the short-lived lab.
+- `aws_s3_bucket.dashboard` — `<project>-dashboard-<account-id>`, force-destroy enabled for the short-lived lab. The account suffix avoids S3 global-name collisions across AWS Academy labs and keeps the Cognito callback URL stable for the active account.
 - `aws_s3_bucket_website_configuration.dashboard` — static website hosting with `index.html`.
 - `aws_s3_bucket_public_access_block.dashboard` — public access block relaxed for the public website endpoint.
 - `aws_s3_bucket_policy.dashboard` — allows public `s3:GetObject` on website objects.
@@ -14,7 +14,7 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 
 | Name      | Type          | Default | Description                                      |
 | --------- | ------------- | ------- | ------------------------------------------------ |
-| `project` | `string`      | n/a     | Prefix for the dashboard bucket name.            |
+| `project` | `string`      | n/a     | Prefix for the dashboard bucket name; the module appends the current AWS account id. |
 | `api_endpoint` | `string` | n/a | API Gateway endpoint used for the bootstrap `config.js`. |
 | `cognito_user_pool_id` | `string` | n/a | Cognito user pool ID written into `config.js`. |
 | `cognito_client_id` | `string` | n/a | Cognito app client ID written into `config.js`. |
