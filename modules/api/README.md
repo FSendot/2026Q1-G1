@@ -37,6 +37,7 @@ Provisions the dashboard API: a Lambda function running inside the VPC (to reach
 | `sns_topic_arn`             | `string`       | n/a     | Summary SNS topic ARN used to create dashboard email subscriptions.           |
 | `jwt_issuer`                | `string`       | n/a     | Cognito issuer URL used by the JWT authorizer.                                 |
 | `jwt_audience`              | `string`       | n/a     | Cognito app client ID used as JWT audience.                                    |
+| `package_file`              | `string`       | n/a     | Path to the pre-built Lambda deployment zip (from `app/api/handler.py` at root). |
 | `log_retention_days`        | `number`       | `30`    | CloudWatch Logs retention days (Lambda and API Gateway log groups).           |
 
 ## Outputs

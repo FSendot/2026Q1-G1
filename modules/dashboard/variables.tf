@@ -14,6 +14,21 @@ variable "tags" {
   default     = {}
 }
 
+variable "index_html_path" {
+  description = "Ruta absoluta al index.html del dashboard bajo app/."
+  type        = string
+}
+
+variable "app_js_path" {
+  description = "Ruta absoluta al app.js del dashboard bajo app/."
+  type        = string
+}
+
+variable "config_js_template_path" {
+  description = "Ruta absoluta al config.js.tpl del dashboard bajo app/."
+  type        = string
+}
+
 variable "api_endpoint" {
   description = "URL base del HTTP API Gateway; se usa para crear el config.js inicial del dashboard."
   type        = string

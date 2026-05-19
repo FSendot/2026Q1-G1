@@ -62,8 +62,8 @@ resource "aws_s3_bucket_policy" "dashboard" {
 resource "aws_s3_object" "index_html" {
   bucket        = aws_s3_bucket.dashboard.id
   key           = "index.html"
-  source        = "${path.root}/app/dashboard/index.html"
-  source_hash   = filemd5("${path.root}/app/dashboard/index.html")
+  source        = var.index_html_path
+  source_hash   = filemd5(var.index_html_path)
   content_type  = "text/html"
   cache_control = local.static_cache_policy
 
@@ -73,8 +73,8 @@ resource "aws_s3_object" "index_html" {
 resource "aws_s3_object" "app_js" {
   bucket        = aws_s3_bucket.dashboard.id
   key           = "app.js"
-  source        = "${path.root}/app/dashboard/app.js"
-  source_hash   = filemd5("${path.root}/app/dashboard/app.js")
+  source        = var.app_js_path
+  source_hash   = filemd5(var.app_js_path)
   content_type  = "application/javascript"
   cache_control = local.static_cache_policy
 
@@ -84,7 +84,7 @@ resource "aws_s3_object" "app_js" {
 resource "aws_s3_object" "config_js" {
   bucket = aws_s3_bucket.dashboard.id
   key    = "config.js"
-  content = templatefile("${path.module}/config.js.tpl", {
+  content = templatefile(var.config_js_template_path, {
     api_endpoint               = var.api_endpoint
     cognito_user_pool_id       = var.cognito_user_pool_id
     cognito_client_id          = var.cognito_client_id

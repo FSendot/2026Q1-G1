@@ -44,9 +44,14 @@ variable "endpoint_security_group_id" {
   type        = string
 }
 
-variable "summarizer_source_file" {
-  description = "Ruta absoluta o relativa al root module del handler Python de la Lambda summarizer. El código vive bajo app/; el módulo sólo lo empaqueta."
+variable "summarizer_package_file" {
+  description = "Ruta absoluta al paquete .zip del handler summarizer, generado desde app/notification/summarizer/handler.py en la composición raíz."
   type        = string
+
+  validation {
+    condition     = length(var.summarizer_package_file) > 0 && endswith(var.summarizer_package_file, ".zip")
+    error_message = "summarizer_package_file debe ser la ruta a un archivo .zip existente."
+  }
 }
 
 variable "summary_interval_minutes" {

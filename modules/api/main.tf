@@ -56,12 +56,6 @@ resource "aws_vpc_security_group_egress_rule" "api_to_endpoints" {
   tags = local.module_tags
 }
 
-data "archive_file" "api_handler" {
-  type        = "zip"
-  output_path = "${path.module}/handler.zip"
-  source_file = "${path.module}/handler.py"
-}
-
 resource "aws_lambda_function" "api" {
   # checkov:skip=CKV_AWS_272: Code signing no configurado en lab académico.
   # checkov:skip=CKV_AWS_50: X-Ray tracing deshabilitado en lab.
@@ -74,8 +68,8 @@ resource "aws_lambda_function" "api" {
   memory_size   = 256
   layers        = [var.psycopg2_layer_arn]
 
-  filename         = data.archive_file.api_handler.output_path
-  source_code_hash = data.archive_file.api_handler.output_base64sha256
+  filename         = var.package_file
+  source_code_hash = filebase64sha256(var.package_file)
 
   vpc_config {
     subnet_ids         = var.private_subnet_ids

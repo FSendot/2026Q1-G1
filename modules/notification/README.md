@@ -28,7 +28,7 @@ The processor publishes all scoring results directly to `modules/results_writer`
 | `vpc_id`                           | `string`       | n/a     | VPC where the summarizer Lambda runs. |
 | `private_subnet_ids`               | `list(string)` | n/a     | Private subnets for the summarizer Lambda. |
 | `endpoint_security_group_id`       | `string`       | n/a     | Interface endpoint SG for Lambda egress to Logs, SQS, and SNS. |
-| `summarizer_source_file`           | `string`       | n/a     | Path to the summarizer Python handler under `app/`; the module only packages it. |
+| `summarizer_package_file`          | `string`       | n/a     | Path to the pre-built summarizer Lambda zip (from `app/notification/summarizer/handler.py` at root). |
 | `summary_interval_minutes`         | `number`       | `7`     | EventBridge schedule interval for summary publication. Root passes `var.fraud_alert_summary_interval_minutes`. |
 | `summarizer_max_messages_per_run`  | `number`       | `500`   | Maximum SQS messages drained by each scheduled run. |
 | `log_retention_days`               | `number`       | `30`    | CloudWatch log retention for the summarizer Lambda. |
@@ -58,7 +58,7 @@ module "notification" {
   vpc_id                     = module.network.vpc_id
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
-  summarizer_source_file     = "${path.module}/app/notification/summarizer/handler.py"
+  summarizer_package_file    = data.archive_file.notification_summarizer.output_path
   summary_interval_minutes   = var.fraud_alert_summary_interval_minutes
   tags                       = local.common_tags
 }
@@ -68,5 +68,5 @@ module "notification" {
 
 - KMS-CMK for SNS, SQS, and CloudWatch Logs is not available in Academy; resources use AWS-owned or SQS-managed encryption where supported.
 - `LabRole` is reused for Lambda execution and queue access because the lab restricts IAM role creation.
-- The summarizer business logic lives in `app/notification/summarizer/handler.py`; the module only owns its infrastructure and packaging.
+- The summarizer business logic lives in `app/notification/summarizer/handler.py`; the root composition builds the zip in `lambdas.tf` and passes `summarizer_package_file`.
 - The Lambda is dependency-free and keeps failed publishes retryable by deleting SQS messages only after `sns:Publish` succeeds.

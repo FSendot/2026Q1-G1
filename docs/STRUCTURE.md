@@ -12,6 +12,7 @@
 ├── .pre-commit-config.yaml
 ├── .tflint.hcl
 ├── main.tf
+├── lambdas.tf              # archive_file: zip Python handlers from app/ before module deploy
 ├── variables.tf
 ├── outputs.tf
 ├── versions.tf
@@ -36,17 +37,12 @@
 │   ├── notification/     # Fraud-alert summary composition: SNS topic, SQS queue, scheduled summarizer Lambda
 │   ├── results_writer/   # SQS results queue + Lambda writer (processor → SQS → Lambda → RDS)
 │   └── api/              # Lambda + HTTP API Gateway (Cognito-protected dashboard API)
-│       ├── main.tf
-│       ├── variables.tf
-│       ├── outputs.tf
-│       ├── versions.tf
-│       └── README.md
 ├── app/
 │   ├── processor/        # Fraud worker container deployed to ECS Fargate
+│   ├── api/              # Dashboard API Lambda handler (Python)
 │   ├── results_writer/   # Go custom-runtime Lambda that drains result SQS batches into RDS
-│   ├── notification/     # Fraud-summary Lambda application code packaged by Terraform
-│   ├── api/              # Dashboard API source + Docker build check; Terraform deploys Lambda zip
-│   ├── dashboard/        # Static frontend export deployed to the dashboard S3 bucket
+│   ├── notification/     # Fraud-summary Lambda handler (Python)
+│   ├── dashboard/        # Static frontend + config.js.tpl; CI syncs build to S3
 │   └── net/              # Local ML pipeline; not deployed, except serving/go used by processor builds
 └── scripts/
 ```
@@ -60,7 +56,9 @@
 - `CONTEXT.md` defines domain language used by auth and dashboard access-control work.
 - `docs/adr/` records architecture decisions that are costly or surprising to reverse.
 - Keep root resource declarations to a minimum: prefer composing modules over inlining resources.
-- `app/` holds the small lab services, Lambda handlers, and Dockerfiles. Keep `app/net` out of cloud deployment; only `app/net/serving/go` is part of the processor build context. Only Docker images consumed by Fargate are pushed to ECR.
+- `app/` holds all application source (handlers, workers, static UI, ML pipeline). **`modules/` must not contain application code** — only Terraform HCL, templates wired from `app/` via `path.root`, and infra READMEs.
+- Lambda zip artifacts are built in the root (`lambdas.tf`) or via `make` (`app/results_writer/build/`, `layers/psycopg2/`). Modules receive `package_file` paths only.
+- Keep `app/net` out of cloud deployment except `app/net/serving/go` in the processor image. Only Fargate processor images are pushed to ECR.
 - `scripts/` holds helper shell scripts, bootstrap files, or templates referenced from Terraform. Treat them as code: review them, keep them small.
 
 ## Adding a new module
