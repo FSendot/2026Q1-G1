@@ -29,8 +29,16 @@ output "vpn_gateway_id" {
 }
 
 output "interface_endpoint_ids" {
-  description = "Mapa de Interface VPC Endpoints provisionados, indexado por servicio (sqs, ecr_api, ecr_dkr, logs)."
-  value       = { for k, v in aws_vpc_endpoint.interface : k => v.id }
+  description = "Mapa de Interface VPC Endpoints provisionados, indexado por servicio (sqs, ecr_api, ecr_dkr, logs, sns, secretsmanager, cognito_idp)."
+  value = merge(
+    { for k, v in aws_vpc_endpoint.interface : k => v.id },
+    { cognito_idp = aws_vpc_endpoint.cognito_idp.id },
+  )
+}
+
+output "cognito_idp_subnet_ids" {
+  description = "Subnets privadas donde se desplegó el VPC endpoint cognito-idp (solo AZs soportadas por el servicio)."
+  value       = local.cognito_idp_subnet_ids
 }
 
 output "sqs_vpc_endpoint_network_interface_ids" {

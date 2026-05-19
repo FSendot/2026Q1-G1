@@ -12,7 +12,6 @@ locals {
     logs           = "com.amazonaws.${data.aws_region.current.name}.logs"
     sns            = "com.amazonaws.${data.aws_region.current.name}.sns"
     secretsmanager = "com.amazonaws.${data.aws_region.current.name}.secretsmanager"
-    cognito_idp    = "com.amazonaws.${data.aws_region.current.name}.cognito-idp"
   }
 
   gateway_endpoint_services = toset(["s3", "dynamodb"])
@@ -48,6 +47,30 @@ module "vpc" {
 
   private_subnet_tags = {
     Tier = "private"
+  }
+}
+
+data "aws_vpc_endpoint_service" "cognito_idp" {
+  service = "cognito-idp"
+}
+
+data "aws_subnet" "private" {
+  for_each = toset(module.vpc.private_subnets)
+  id       = each.value
+}
+
+locals {
+  cognito_idp_subnet_ids = [
+    for subnet_id, subnet in data.aws_subnet.private :
+    subnet_id
+    if contains(data.aws_vpc_endpoint_service.cognito_idp.availability_zones, subnet.availability_zone)
+  ]
+}
+
+check "cognito_idp_subnet_coverage" {
+  assert {
+    condition     = length(local.cognito_idp_subnet_ids) > 0
+    error_message = "Ninguna subnet privada está en una AZ que soporte el VPC endpoint cognito-idp. Ajustá var.azs en la composición raíz."
   }
 }
 
@@ -130,5 +153,18 @@ resource "aws_vpc_endpoint" "interface" {
 
   tags = merge(local.module_tags, {
     Name = format("%s-vpce-%s", var.project, replace(each.key, "_", "-"))
+  })
+}
+
+resource "aws_vpc_endpoint" "cognito_idp" {
+  vpc_id              = module.vpc.vpc_id
+  service_name        = data.aws_vpc_endpoint_service.cognito_idp.service_name
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = local.cognito_idp_subnet_ids
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.module_tags, {
+    Name = format("%s-vpce-cognito-idp", var.project)
   })
 }
