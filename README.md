@@ -19,7 +19,7 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 ## Operaciones con GitHub Actions
 
-**GitHub Actions es el camino recomendado** para desplegar, probar y destruir la infraestructura del lab. Los workflows construyen los artefactos necesarios, inicializan el backend S3 y ejecutan Terraform sin depender de herramientas locales.
+**GitHub Actions es el camino recomendado** para desplegar, probar y destruir la infraestructura del lab. Solo **Validate** corre en automático en cada push/PR; **Plan**, **Deploy** y el resto de operaciones AWS se lanzan manualmente desde la pestaña Actions.
 
 ### Requisitos previos
 
@@ -29,12 +29,12 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 | Repositorio en GitHub   | Fork o clone de este proyecto                                    |
 | Lab AWS Academy         | Sesión activa; las credenciales temporales expiran cada ~4 h     |
 | Secrets del repositorio | Ver tabla siguiente                                              |
-| Rama `main`             | Requerida para que **Deploy** ejecute el deploy completo en push |
+| Rama `main`             | Recomendada al ejecutar **Plan** / **Deploy** manualmente (elegir branch en Run workflow) |
 
 
 **Secrets del repositorio** (Settings → Secrets and variables → Actions):
 
-**Mínimo para cualquier workflow que toque AWS** (Plan, Deploy en `main`, Terraform Apply, Send test transactions, Destroy):
+**Mínimo para cualquier workflow que toque AWS** (Plan, Deploy, Terraform Apply, Send test transactions, Destroy):
 
 
 | Secret                  | ¿Obligatorio? |
@@ -72,15 +72,14 @@ Los tres forman un set indivisible: credenciales temporales del lab AWS Academy.
 **Secrets obligatorios por workflow:**
 
 
-| Workflow                                            | Secrets obligatorios                                              | Secrets opcionales              | Sin secrets                    |
-| --------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------- | ------------------------------ |
-| **Validate**                                        | —                                                                 | —                               | Sí (no usa AWS ni bootstrap)   |
-| **Plan**                                            | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | —                               | No                             |
-| **Deploy** (PR / rama ≠ `main`)                     | —                                                                 | —                               | Sí (solo valida builds Docker) |
-| **Deploy** (`main` o `workflow_dispatch` en `main`) | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
-| **Terraform Apply**                                 | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
-| **Send test transactions**                          | Los 3 AWS                                                         | —                               | No                             |
-| **Destroy**                                         | Los 3 AWS                                                         | —                               | No                             |
+| Workflow                   | Secrets obligatorios                                              | Secrets opcionales              | Sin secrets                  |
+| -------------------------- | ----------------------------------------------------------------- | ------------------------------- | ---------------------------- |
+| **Validate** (automático)  | —                                                                 | —                               | Sí (no usa AWS ni bootstrap) |
+| **Plan** (manual)          | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | —                               | No                           |
+| **Deploy** (manual)        | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                           |
+| **Terraform Apply** (manual) | Los 3 AWS                                                       | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                           |
+| **Send test transactions** (manual) | Los 3 AWS                                                  | —                               | No                           |
+| **Destroy** (manual)       | Los 3 AWS                                                         | —                               | No                           |
 
 
 **Recomendado para el primer deploy:** los 3 AWS + `BOOTSTRAP_EMAIL`. Sin `BOOTSTRAP_EMAIL` el deploy termina bien, pero hay que crear el admin del dashboard a mano con `make bootstrap-auth` en local.
@@ -91,26 +90,33 @@ Los workflows **no leen `terraform.tfvars`**. Los defaults del lab están en la 
 
 ### Catálogo de workflows
 
-Ejecutar manualmente: pestaña **Actions** → elegir workflow → **Run workflow**.
+**Automático (CI):** cada push y cada pull request ejecutan solo **Validate** (`terraform fmt -check`, `init -backend=false`, `validate`).
+
+**Manual:** pestaña **Actions** → elegir workflow → **Run workflow** → escribir la palabra de confirmación indicada.
 
 
-| Workflow                   | Trigger                                               | Cuándo usarlo                                   | Requisitos previos                                             |
-| -------------------------- | ----------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------- |
-| **Validate**               | Push y PR a cualquier rama                            | CI en cada cambio                               | Ninguno (sin AWS)                                              |
-| **Plan**                   | Push/PR a `main`                                      | Revisar diff antes de merge                     | Secrets AWS; crea el bucket de state en el primer run          |
-| **Deploy**                 | Push a `main` (paths filtrados) o `workflow_dispatch` | Stack completa e2e (CD principal)               | Secrets AWS; en `main`: escribir `deploy` si es manual         |
-| **Terraform Apply**        | `workflow_dispatch`                                   | Solo infraestructura Terraform                  | Secrets AWS; escribir `apply` en el input de confirmación      |
-| **Send test transactions** | `workflow_dispatch`                                   | Carga de prueba post-deploy                     | Secrets AWS + infra levantada + `enable_onprem_sim = true`     |
-| **Destroy**                | `workflow_dispatch`                                   | Fin de sesión del lab                           | Secrets AWS; escribir `destroy` en el input de confirmación    |
+| Workflow                   | Trigger                          | Cuándo usarlo                              | Confirmación | Requisitos previos                                    |
+| -------------------------- | -------------------------------- | ------------------------------------------ | ------------ | ----------------------------------------------------- |
+| **Validate**               | Push y PR (cualquier rama)       | CI en cada cambio                          | —            | Ninguno (sin AWS)                                     |
+| **Plan**                   | `workflow_dispatch`              | Revisar diff contra AWS antes de deploy    | `plan`       | Secrets AWS; crea el bucket de state en el primer run |
+| **Deploy**                 | `workflow_dispatch`              | Stack completa e2e (imagen, infra, dashboard) | `deploy`  | Secrets AWS                                           |
+| **Terraform Apply**        | `workflow_dispatch`              | Solo infraestructura Terraform             | `apply`      | Secrets AWS                                           |
+| **Send test transactions** | `workflow_dispatch`              | Carga de prueba post-deploy                | —            | Secrets AWS + infra + `enable_onprem_sim = true`      |
+| **Destroy**                | `workflow_dispatch`              | Fin de sesión del lab                      | `destroy`    | Secrets AWS                                           |
 
+#### Deploy (stack completa, solo manual)
 
-**Paths que disparan Deploy en push a `main`:** `app/processor/**`, `app/dashboard/**`, `app/results_writer/**`, `app/net/serving/go/**`, `modules/**`, `scripts/**`, `templates/**`, `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`, `backend.tf`, `lambdas.tf`, `.github/workflows/deploy.yml`.
+**Importante:** un push o merge a `main` **no** despliega la infraestructura ni las apps. Tras integrar cambios en `main`, hay que lanzar **Deploy** a mano desde GitHub Actions.
 
-En PRs contra `main`, **Deploy** solo valida builds (processor + dashboard export) sin tocar AWS.
+**Cómo ejecutarlo:**
 
-#### Deploy en `main` (stack completa)
+1. Renovar los tres secrets AWS si el lab expiró.
+2. GitHub → pestaña **Actions** → workflow **Deploy** → **Run workflow**.
+3. Elegir la rama (recomendado: `main`).
+4. En el campo de confirmación escribir exactamente `deploy`.
+5. Esperar el run verde y revisar el **job summary** (*Deployment outputs*).
 
-Secuencia del workflow `[.github/workflows/deploy.yml](.github/workflows/deploy.yml)`:
+Secuencia interna del workflow `[.github/workflows/deploy.yml](.github/workflows/deploy.yml)`:
 
 1. `make prepare-model`
 2. Build/push de imagen del processor a ECR (reutiliza por hash de fuentes si ya existe)
@@ -118,7 +124,9 @@ Secuencia del workflow `[.github/workflows/deploy.yml](.github/workflows/deploy.
 4. Build del dashboard con build-args de Cognito/API → `aws s3 sync` a S3
 5. `make bootstrap-auth` si `BOOTSTRAP_EMAIL` está configurado
 
-En push a `main` el deploy corre automáticamente. En `workflow_dispatch` hay que escribir `deploy` en el campo de confirmación.
+#### Plan (manual)
+
+Workflow `[.github/workflows/plan.yml](.github/workflows/plan.yml)`: `terraform init` (backend S3) + `terraform plan`. El artefacto `plan_output.txt` queda disponible en el run. Confirmación: escribir `plan`.
 
 #### Terraform Apply (solo infraestructura, manual)
 
@@ -126,7 +134,7 @@ Workflow `[.github/workflows/apply.yml](.github/workflows/apply.yml)`: aplica Te
 
 Usar cuando:
 
-- Los cambios son solo HCL/infra y no entran en los path filters de Deploy.
+- Los cambios son solo HCL/infra y no requieren rebuild de imagen ni dashboard.
 - Querés re-aplicar infra sin rebuild de imagen ni frontend (más rápido).
 
 **No** usar para el primer deploy ni para actualizar apps. Tras un **Deploy** exitoso, un **Terraform Apply** puede revertir el task definition del processor a `:placeholder`; en ese caso volver a correr **Deploy**.
@@ -136,10 +144,12 @@ Escribir `apply` en el campo de confirmación.
 ### Primer deploy (checklist)
 
 1. Configurar secrets en GitHub (mínimo: los tres AWS; recomendado: `BOOTSTRAP_EMAIL`).
-2. Push/merge a `main` **o** ejecutar **Deploy** con `workflow_dispatch` (escribir `deploy`).
-3. Esperar run verde; abrir el **job summary** del run (tabla *Deployment outputs* con `dashboard_url`, `api_endpoint`, `queue_url`).
-4. Ejecutar **Send test transactions** (`workflow_dispatch`, defaults abajo).
-5. Abrir `dashboard_url` del summary; completar registro Cognito si no se definió `BOOTSTRAP_PASSWORD`.
+2. Integrar el código en `main` (el push/PR solo dispara **Validate**; no crea recursos en AWS).
+3. (Opcional) Actions → **Plan** → Run workflow → confirmación `plan`.
+4. Actions → **Deploy** → Run workflow → rama `main` → confirmación `deploy`.
+5. Esperar run verde; abrir el **job summary** (*Deployment outputs*: `dashboard_url`, `api_endpoint`, `queue_url`).
+6. Actions → **Send test transactions** (defaults abajo).
+7. Abrir `dashboard_url` del summary; completar registro Cognito si no se definió `BOOTSTRAP_PASSWORD`.
 
 ### Probar el flujo completo
 
@@ -162,7 +172,7 @@ Patrones de transacción generados:
 
 ### Outputs tras un deploy
 
-**Deploy** (solo `main`) y **Terraform Apply** escriben una tabla en el job summary:
+**Deploy** y **Terraform Apply** escriben una tabla en el job summary:
 
 
 | Output              | Uso                                               |
@@ -302,7 +312,7 @@ Sitio web estático en S3 con el panel de operaciones. Muestra las últimas tran
 
 **Recursos:** `[aws_s3_bucket.dashboard](modules/dashboard/main.tf#L9)`, `[aws_s3_bucket_website_configuration.dashboard](modules/dashboard/main.tf#L23)`, `[aws_s3_bucket_policy.dashboard](modules/dashboard/main.tf#L41)`, objetos estáticos: `[aws_s3_object.index_html](modules/dashboard/main.tf#L58)`, `[aws_s3_object.app_js](modules/dashboard/main.tf#L72)`, `[aws_s3_object.config_js](modules/dashboard/main.tf#L86)` (`templatefile()` con la URL de API Gateway).
 
-Los archivos `index.html` y `app.js` son subidos por el pipeline CI/CD mediante `aws s3 sync` después de cada build.
+Terraform crea el bucket y objetos iniciales; el contenido actualizado del frontend se publica con `aws s3 sync` al final del workflow **Deploy** (manual).
 
 ### `modules/auth`
 
@@ -354,7 +364,7 @@ La autorización final no vive sólo en Cognito: la Lambda API mantiene una tabl
 
 ## Desarrollo local (opcional)
 
-Usar la consola local solo cuando haga falta: tail de logs en vivo, depuración offline, o ajustes en `terraform.tfvars`. Para deploy, pruebas de carga y teardown, preferir [Operaciones con GitHub Actions](#operaciones-con-github-actions).
+Usar la consola local solo cuando haga falta: tail de logs en vivo, depuración offline, o ajustes en `terraform.tfvars`. Para el deploy completo (imagen + infra + dashboard), usar el workflow manual **Deploy** en [Operaciones con GitHub Actions](#operaciones-con-github-actions); push/merge no alcanza.
 
 ### Prerrequisitos (solo local)
 
@@ -507,7 +517,7 @@ El dashboard distingue entre:
 
 Cognito autentica. RDS autoriza. La tabla `dashboard_access` permite que el bootstrap admin invite emails antes de que el usuario se registre. Cuando el usuario entra con Cognito y su email está verificado, `/dashboard/me` activa la invitación pendiente y recién ahí el dashboard carga datos financieros.
 
-**Bootstrap automático (recomendado):** si `BOOTSTRAP_EMAIL` está configurado como secret, los workflows **Deploy** (`main`) y **Terraform Apply** ejecutan `make bootstrap-auth` al final. Con `BOOTSTRAP_PASSWORD` opcional, también crean o resetean el usuario Cognito.
+**Bootstrap automático (recomendado):** si `BOOTSTRAP_EMAIL` está configurado como secret, los workflows **Deploy** y **Terraform Apply** ejecutan `make bootstrap-auth` al final. Con `BOOTSTRAP_PASSWORD` opcional, también crean o resetean el usuario Cognito.
 
 **Bootstrap manual (opcional):**
 
