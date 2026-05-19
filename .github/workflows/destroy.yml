@@ -1,10 +1,10 @@
-name: Apply
+name: Destroy
 
 on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Escribir "apply" para confirmar el deploy'
+        description: 'Escribir "destroy" para confirmar la destrucción'
         required: true
         type: string
 
@@ -12,21 +12,16 @@ permissions:
   contents: read
 
 jobs:
-  apply:
-    name: Terraform Apply
+  destroy:
+    name: Terraform Destroy
     runs-on: ubuntu-latest
-    if: github.event.inputs.confirm == 'apply'
+    if: github.event.inputs.confirm == 'destroy'
 
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       AWS_DEFAULT_REGION: us-east-1
-      TF_VAR_google_oauth_client_id: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      TF_VAR_google_oauth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      BOOTSTRAP_EMAIL: ${{ secrets.BOOTSTRAP_EMAIL }}
-      BOOTSTRAP_ALERT_EMAIL: ${{ secrets.BOOTSTRAP_ALERT_EMAIL }}
-      BOOTSTRAP_PASSWORD: ${{ secrets.BOOTSTRAP_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v6
@@ -57,22 +52,5 @@ jobs:
             --versioning-configuration Status=Enabled
           terraform init -migrate-state -force-copy -backend-config="bucket=${BUCKET}"
 
-      - name: Apply
-        run: terraform apply -auto-approve
-
-      - name: Bootstrap dashboard admin
-        if: env.BOOTSTRAP_EMAIL != ''
-        run: make bootstrap-auth
-
-      - name: Write deployment summary
-        run: |
-          {
-            echo "## Deployment outputs"
-            echo ""
-            echo "| Output | Value |"
-            echo "|--------|-------|"
-            echo "| dashboard_url | \`$(terraform output -raw dashboard_url)\` |"
-            echo "| dashboard_app_url | \`$(terraform output -raw dashboard_app_url)\` |"
-            echo "| api_endpoint | \`$(terraform output -raw api_endpoint)\` |"
-            echo "| queue_url | \`$(terraform output -raw queue_url)\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Destroy
+        run: terraform destroy -auto-approve

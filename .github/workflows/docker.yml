@@ -262,3 +262,17 @@ jobs:
       - name: Bootstrap dashboard admin
         if: github.ref == 'refs/heads/main' && env.BOOTSTRAP_EMAIL != ''
         run: make bootstrap-auth
+
+      - name: Write deployment summary
+        if: github.ref == 'refs/heads/main'
+        run: |
+          {
+            echo "## Deployment outputs"
+            echo ""
+            echo "| Output | Value |"
+            echo "|--------|-------|"
+            echo "| dashboard_url | \`$(terraform output -raw dashboard_url)\` |"
+            echo "| dashboard_app_url | \`$(terraform output -raw dashboard_app_url)\` |"
+            echo "| api_endpoint | \`$(terraform output -raw api_endpoint)\` |"
+            echo "| queue_url | \`$(terraform output -raw queue_url)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
