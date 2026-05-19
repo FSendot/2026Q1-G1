@@ -29,12 +29,12 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 | Repositorio en GitHub   | Fork o clone de este proyecto                                    |
 | Lab AWS Academy         | Sesión activa; las credenciales temporales expiran cada ~4 h     |
 | Secrets del repositorio | Ver tabla siguiente                                              |
-| Rama `main`             | Requerida para que **Docker** ejecute el deploy completo en push |
+| Rama `main`             | Requerida para que **Deploy** ejecute el deploy completo en push |
 
 
 **Secrets del repositorio** (Settings → Secrets and variables → Actions):
 
-**Mínimo para cualquier workflow que toque AWS** (Plan, Docker en `main`, Apply, Send test transactions, Destroy):
+**Mínimo para cualquier workflow que toque AWS** (Plan, Deploy en `main`, Terraform Apply, Send test transactions, Destroy):
 
 
 | Secret                  | ¿Obligatorio? |
@@ -54,7 +54,7 @@ Los tres forman un set indivisible: credenciales temporales del lab AWS Academy.
 | `BOOTSTRAP_EMAIL`            | Tu email real de acceso al dashboard, p. ej. `nombre.apellido@itba.edu.ar`                                   | Crea el **primer admin del dashboard** en RDS. Sin este secret el deploy termina bien, pero nadie puede administrar invitaciones hasta correr bootstrap a mano.                                                                             |
 | `BOOTSTRAP_PASSWORD`         | Una contraseña permanente para Cognito que cumpla la política del User Pool, p. ej. `UnaPasswordDemo123!`    | Solo tiene efecto si también existe `BOOTSTRAP_EMAIL`. Crea o actualiza el usuario Cognito con ese email, marca el correo como verificado y fija la contraseña.                                                                             |
 | `BOOTSTRAP_ALERT_EMAIL`      | Otro email válido, p. ej. `alertas@example.com`                                                              | Solo tiene efecto si también existe `BOOTSTRAP_EMAIL`. Durante el bootstrap, suscribe ese email al **topic SNS de resúmenes de fraude** para recibir los emails agregados de transacciones fraudulentas.                                    |
-| `GOOGLE_OAUTH_CLIENT_ID`     | Client ID de una OAuth 2.0 Client en Google Cloud Console, p. ej. `123456789-abc.apps.googleusercontent.com` | Solo tiene efecto en **Docker** / **Apply** si **ambos** secrets Google están definidos. Terraform configura Cognito con Google como identity provider; en el login del dashboard aparece **“Sign in with Google”** además del login local. |
+| `GOOGLE_OAUTH_CLIENT_ID`     | Client ID de una OAuth 2.0 Client en Google Cloud Console, p. ej. `123456789-abc.apps.googleusercontent.com` | Solo tiene efecto en **Deploy** / **Terraform Apply** si **ambos** secrets Google están definidos. Terraform configura Cognito con Google como identity provider; en el login del dashboard aparece **“Sign in with Google”** además del login local. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Client secret asociado al mismo OAuth client de Google                                                       | Par obligatorio con `GOOGLE_OAUTH_CLIENT_ID`. Sin los dos, Cognito queda solo con login por email/contraseña. En Google Cloud hay que registrar el redirect URI de Cognito (ver sección [Dashboard Auth](#dashboard-auth)).                 |
 
 
@@ -76,9 +76,9 @@ Los tres forman un set indivisible: credenciales temporales del lab AWS Academy.
 | --------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------- | ------------------------------ |
 | **Validate**                                        | —                                                                 | —                               | Sí (no usa AWS ni bootstrap)   |
 | **Plan**                                            | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | —                               | No                             |
-| **Docker** (PR / rama ≠ `main`)                     | —                                                                 | —                               | Sí (solo valida builds Docker) |
-| **Docker** (`main` o `workflow_dispatch` en `main`) | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
-| **Apply**                                           | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
+| **Deploy** (PR / rama ≠ `main`)                     | —                                                                 | —                               | Sí (solo valida builds Docker) |
+| **Deploy** (`main` o `workflow_dispatch` en `main`) | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
+| **Terraform Apply**                                 | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
 | **Send test transactions**                          | Los 3 AWS                                                         | —                               | No                             |
 | **Destroy**                                         | Los 3 AWS                                                         | —                               | No                             |
 
@@ -98,19 +98,19 @@ Ejecutar manualmente: pestaña **Actions** → elegir workflow → **Run workflo
 | -------------------------- | ----------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------- |
 | **Validate**               | Push y PR a cualquier rama                            | CI en cada cambio                               | Ninguno (sin AWS)                                              |
 | **Plan**                   | Push/PR a `main`                                      | Revisar diff antes de merge                     | Secrets AWS; crea el bucket de state en el primer run          |
-| **Docker**                 | Push a `main` (paths filtrados) o `workflow_dispatch` | Deploy completo (camino CD principal)           | Secrets AWS; en `main`: apply + dashboard + bootstrap opcional |
-| **Apply**                  | `workflow_dispatch`                                   | Apply Terraform sin rebuild de imagen/dashboard | Secrets AWS; escribir `apply` en el input de confirmación      |
+| **Deploy**                 | Push a `main` (paths filtrados) o `workflow_dispatch` | Stack completa e2e (CD principal)               | Secrets AWS; en `main`: escribir `deploy` si es manual         |
+| **Terraform Apply**        | `workflow_dispatch`                                   | Solo infraestructura Terraform                  | Secrets AWS; escribir `apply` en el input de confirmación      |
 | **Send test transactions** | `workflow_dispatch`                                   | Carga de prueba post-deploy                     | Secrets AWS + infra levantada + `enable_onprem_sim = true`     |
 | **Destroy**                | `workflow_dispatch`                                   | Fin de sesión del lab                           | Secrets AWS; escribir `destroy` en el input de confirmación    |
 
 
-**Paths que disparan Docker en push a `main`:** `app/processor/`**, `app/dashboard/**`, `app/results_writer/**`, `app/net/serving/go/**`, `modules/**`, `scripts/**`, `templates/**`, `main.tf`, `variables.tf`, `outputs.tf`, `.github/workflows/docker.yml`.
+**Paths que disparan Deploy en push a `main`:** `app/processor/**`, `app/dashboard/**`, `app/results_writer/**`, `app/net/serving/go/**`, `modules/**`, `scripts/**`, `templates/**`, `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`, `backend.tf`, `lambdas.tf`, `.github/workflows/deploy.yml`.
 
-En PRs contra `main`, **Docker** solo valida builds (processor + dashboard export) sin tocar AWS.
+En PRs contra `main`, **Deploy** solo valida builds (processor + dashboard export) sin tocar AWS.
 
-#### Docker en `main` (deploy principal)
+#### Deploy en `main` (stack completa)
 
-Secuencia real del workflow `[.github/workflows/docker.yml](.github/workflows/docker.yml)`:
+Secuencia del workflow `[.github/workflows/deploy.yml](.github/workflows/deploy.yml)`:
 
 1. `make prepare-model`
 2. Build/push de imagen del processor a ECR (reutiliza por hash de fuentes si ya existe)
@@ -118,14 +118,25 @@ Secuencia real del workflow `[.github/workflows/docker.yml](.github/workflows/do
 4. Build del dashboard con build-args de Cognito/API → `aws s3 sync` a S3
 5. `make bootstrap-auth` si `BOOTSTRAP_EMAIL` está configurado
 
-#### Apply (alternativa manual)
+En push a `main` el deploy corre automáticamente. En `workflow_dispatch` hay que escribir `deploy` en el campo de confirmación.
 
-Usar **Apply** cuando los cambios no entran en los path filters de Docker (por ejemplo, solo HCL fuera de esas rutas) o cuando se necesita un `terraform apply` sin reconstruir imagen ni dashboard. Escribir `apply` en el campo de confirmación.
+#### Terraform Apply (solo infraestructura, manual)
+
+Workflow `[.github/workflows/apply.yml](.github/workflows/apply.yml)`: aplica Terraform **sin** imagen ECR, **sin** dashboard en S3 y **sin** `image_uri` (ECS puede quedar en `:placeholder`).
+
+Usar cuando:
+
+- Los cambios son solo HCL/infra y no entran en los path filters de Deploy.
+- Querés re-aplicar infra sin rebuild de imagen ni frontend (más rápido).
+
+**No** usar para el primer deploy ni para actualizar apps. Tras un **Deploy** exitoso, un **Terraform Apply** puede revertir el task definition del processor a `:placeholder`; en ese caso volver a correr **Deploy**.
+
+Escribir `apply` en el campo de confirmación.
 
 ### Primer deploy (checklist)
 
 1. Configurar secrets en GitHub (mínimo: los tres AWS; recomendado: `BOOTSTRAP_EMAIL`).
-2. Push/merge a `main` **o** ejecutar **Docker** / **Apply** con `workflow_dispatch`.
+2. Push/merge a `main` **o** ejecutar **Deploy** con `workflow_dispatch` (escribir `deploy`).
 3. Esperar run verde; abrir el **job summary** del run (tabla *Deployment outputs* con `dashboard_url`, `api_endpoint`, `queue_url`).
 4. Ejecutar **Send test transactions** (`workflow_dispatch`, defaults abajo).
 5. Abrir `dashboard_url` del summary; completar registro Cognito si no se definió `BOOTSTRAP_PASSWORD`.
@@ -137,7 +148,7 @@ Usar **Apply** cuando los cambios no entran en los path filters de Docker (por e
 | ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Enviar transacciones   | **Send test transactions**                      | Inputs: `count` (default `50000`), `fraud_pct` (`20`), `concurrency` (`128`), `region`, `stack`; opcional `queue_url` / `instance_id` |
 | Ver logs del processor | Sin workflow                                    | Opcional local: `make logs` (AWS CLI + credenciales; ver [Desarrollo local](#desarrollo-local-opcional))                              |
-| Abrir dashboard        | URL en el job summary de **Docker** / **Apply** | Login Cognito Hosted UI                                                                                                               |
+| Abrir dashboard        | URL en el job summary de **Deploy**             | Login Cognito Hosted UI                                                                                                               |
 
 
 **Send test transactions** obtiene el instance ID del EC2 on-prem desde CloudFormation y la queue URL desde `terraform output` (salvo overrides). El generador Go corre en el EC2 vía SSM (`AWS-RunShellScript`); el tráfico SQS viaja por VPN al Interface VPC Endpoint. En el EC2, el generador firma requests con SigV4 y envía batches de hasta 10 mensajes; `concurrency` controla workers simultáneos.
@@ -151,7 +162,7 @@ Patrones de transacción generados:
 
 ### Outputs tras un deploy
 
-Los workflows **Docker** (solo `main`) y **Apply** escriben una tabla en el job summary:
+**Deploy** (solo `main`) y **Terraform Apply** escriben una tabla en el job summary:
 
 
 | Output              | Uso                                               |
@@ -473,7 +484,7 @@ aws s3 rb "s3://itba-tp-fraud-tfstate-$(aws sts get-caller-identity --query Acco
 
 ## Dashboard
 
-El dashboard es un sitio web estático en S3 que consulta la API REST en tiempo real. Tras un deploy exitoso (**Docker** o **Apply**), la URL aparece en el job summary como `dashboard_url`. También se puede obtener localmente:
+El dashboard es un sitio web estático en S3 que consulta la API REST en tiempo real. Tras un deploy exitoso con **Deploy**, la URL aparece en el job summary como `dashboard_url`. También se puede obtener localmente:
 
 ```bash
 terraform output -raw dashboard_url
@@ -496,7 +507,7 @@ El dashboard distingue entre:
 
 Cognito autentica. RDS autoriza. La tabla `dashboard_access` permite que el bootstrap admin invite emails antes de que el usuario se registre. Cuando el usuario entra con Cognito y su email está verificado, `/dashboard/me` activa la invitación pendiente y recién ahí el dashboard carga datos financieros.
 
-**Bootstrap automático (recomendado):** si `BOOTSTRAP_EMAIL` está configurado como secret, los workflows **Docker** (`main`) y **Apply** ejecutan `make bootstrap-auth` al final del deploy. Con `BOOTSTRAP_PASSWORD` opcional, también crean o resetean el usuario Cognito.
+**Bootstrap automático (recomendado):** si `BOOTSTRAP_EMAIL` está configurado como secret, los workflows **Deploy** (`main`) y **Terraform Apply** ejecutan `make bootstrap-auth` al final. Con `BOOTSTRAP_PASSWORD` opcional, también crean o resetean el usuario Cognito.
 
 **Bootstrap manual (opcional):**
 
@@ -545,7 +556,7 @@ curl -H "Authorization: Bearer <id-token>" "$API/transactions?limit=10"
 ├── backend.tf               # Backend S3 (partial config, bucket se pasa en init)
 ├── terraform.tfvars.example # Plantilla de configuración
 ├── Makefile                 # Targets: init, plan, apply, destroy, build-layers, seed, send-test-tx, logs
-├── .github/workflows/       # Validate, Plan, Docker, Apply, Destroy, Send test transactions
+├── .github/workflows/       # Validate, Plan, Deploy, Terraform Apply, Destroy, Send test transactions
 ├── modules/
 │   ├── network/             # VPC, subnets, VPN Gateway, VPC Endpoints
 │   ├── queue/               # SQS ingesta + DLQ + CIDR lock on-prem
