@@ -9,6 +9,12 @@ yum install -y python3 python3-pip bind-utils >/dev/null
 pip3 install --quiet boto3
 
 install -d -m 0755 /opt/onprem-tx-producer
+
+cat >/opt/onprem-tx-producer/wait-for-sqs-dns.sh <<'EOF'
+${wait_script}
+EOF
+chmod 0755 /opt/onprem-tx-producer/wait-for-sqs-dns.sh
+
 cat >/opt/onprem-tx-producer/tx_producer.py <<'EOF'
 ${producer_script}
 EOF
@@ -27,7 +33,7 @@ Environment=AWS_REGION=${region}
 Environment=BATCH_SIZE=${batch_size}
 Environment=LOOP_INTERVAL_SEC=${loop_interval_sec}
 Environment=FRAUD_PCT=${fraud_pct}
-ExecStartPre=/bin/bash -c 'for i in $$(seq 1 60); do ip=$$(dig +short sqs.${region}.amazonaws.com | head -n1); if [[ -n "$$ip" ]]; then exit 0; fi; sleep 5; done; echo "SQS private DNS not ready after 5 minutes"; exit 1'
+ExecStartPre=/opt/onprem-tx-producer/wait-for-sqs-dns.sh
 ExecStart=/usr/bin/python3 /opt/onprem-tx-producer/tx_producer.py
 Restart=always
 RestartSec=10
