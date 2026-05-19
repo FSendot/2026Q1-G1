@@ -1207,10 +1207,11 @@
       return;
     }
     tbody.innerHTML = rows.map(row => {
+      const id = textOrEmpty(row.id);
       const email = textOrEmpty(row.email || row.user_email || row.invited_email);
       const displayName = textOrEmpty(row.display_name || row.name);
       const isBootstrapAdmin = Boolean(row.is_bootstrap_admin);
-      const isDisabled = Boolean(row.disabled || row.is_disabled || row.revoked || row.archived);
+      const isDisabled = Boolean(row.disabled || row.is_disabled || row.revoked || row.archived || row.status === "disabled");
       const status = isBootstrapAdmin ? "Bootstrap admin" : isDisabled ? "Deshabilitada" : (row.status || "Activa");
       const disabledLabel = isBootstrapAdmin ? "Protegida" : "Deshabilitar";
       return `<tr>
@@ -1219,12 +1220,12 @@
         <td>${esc(status)}</td>
         <td>${isBootstrapAdmin ? '<span class="pill challenge">Protegida</span>' : (isDisabled ? '<span class="pill block">Inactiva</span>' : '<span class="pill allow">Activa</span>')}</td>
         <td>
-          <button class="btn-ghost btn-mini invite-disable" data-email="${esc(email)}" ${isBootstrapAdmin || isDisabled ? "disabled" : ""}>${esc(disabledLabel)}</button>
+          <button class="btn-ghost btn-mini invite-disable" data-id="${esc(id)}" data-email="${esc(email)}" ${!id || isBootstrapAdmin || isDisabled ? "disabled" : ""}>${esc(disabledLabel)}</button>
         </td>
       </tr>`;
     }).join("");
     tbody.querySelectorAll(".invite-disable").forEach(btn => {
-      btn.addEventListener("click", () => disableInvite(btn.dataset.email));
+      btn.addEventListener("click", () => disableInvite(btn.dataset.id, btn.dataset.email));
     });
   }
 
@@ -1254,29 +1255,18 @@
     }
   }
 
-  async function disableInvite(email) {
-    if (!email) return;
-    if (!window.confirm(`Deshabilitar invitación para ${email}?`)) return;
-    const attempts = [
-      { path: "/dashboard/invites", body: { email } },
-      { path: `/dashboard/invites/${encodeURIComponent(email)}` },
-      { path: `/dashboard/invites?email=${encodeURIComponent(email)}` },
-    ];
-    let lastErr = null;
-    for (const attempt of attempts) {
-      try {
-        await apiFetch(attempt.path, {
-          method: "DELETE",
-          body: attempt.body || null,
-        });
-        await loadInvites();
-        return;
-      } catch (err) {
-        lastErr = err;
-        if (![404, 405].includes(Number(err.status))) break;
-      }
+  async function disableInvite(id, email) {
+    if (!id) {
+      showErr("invites", "No se encontró el id de la invitación. Recargá la página.");
+      return;
     }
-    showErr("invites", lastErr?.message || "No se pudo deshabilitar la invitación.");
+    if (!window.confirm(`Deshabilitar invitación para ${email || id}?`)) return;
+    try {
+      await apiFetch(`/dashboard/invites/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await loadInvites();
+    } catch (err) {
+      showErr("invites", err.message || "No se pudo deshabilitar la invitación.");
+    }
   }
 
   // ── Bootstrap ──────────────────────────────────────────────────────────────
