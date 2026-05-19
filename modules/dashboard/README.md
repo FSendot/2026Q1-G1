@@ -38,7 +38,7 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 
 ## Deployment
 
-The Docker workflow builds the dashboard export with the current API Gateway endpoint:
+The Deploy workflow builds the dashboard export with the current API Gateway endpoint:
 
 ```bash
 docker build \
