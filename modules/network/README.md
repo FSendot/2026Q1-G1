@@ -12,7 +12,8 @@ The module is intentionally narrow: it does not create NAT gateways, IGWs, or pu
   - The VGW attached to the VPC, with route propagation enabled on private route tables (ready for a future Customer Gateway / `aws_vpn_connection`).
   - The default security group locked down (no ingress, no egress).
 - Provisions Gateway VPC Endpoints for **S3** and **DynamoDB**, attached to all private route tables.
-- Provisions Interface VPC Endpoints for **SQS**, **ECR API**, **ECR DKR**, **CloudWatch Logs**, **SNS**, **Secrets Manager**, and **Cognito IDP** in each private subnet, all sharing one security group. The Cognito IDP endpoint lets the private API Lambda change Cognito passwords without a NAT gateway.
+- Provisions Interface VPC Endpoints for **SQS**, **ECR API**, **ECR DKR**, **CloudWatch Logs**, **SNS**, and **Secrets Manager** in each private subnet, all sharing one security group.
+- Provisions **Cognito IDP** as a separate Interface VPC Endpoint only in private subnets whose AZ is supported by the service (Cognito IDP is not available in every AZ). This lets the private API Lambda call Cognito without a NAT gateway.
 - Creates a dedicated SG `<project>-endpoints-sg` that accepts HTTPS from the VPC CIDR and optional additional client CIDRs, such as the simulated on-prem VPC when it reaches SQS through the VPN.
 
 ## Inputs
@@ -36,6 +37,7 @@ The module is intentionally narrow: it does not create NAT gateways, IGWs, or pu
 | `endpoint_security_group_id` | SG attached to the interface endpoints. Task SGs must allow egress to this SG on tcp/443.  |
 | `vpn_gateway_id`             | VGW ID (consumed by `modules/onprem_sim` for the Site-to-Site VPN).                        |
 | `interface_endpoint_ids`     | Map service → endpoint ID for `sqs`, `ecr_api`, `ecr_dkr`, `logs`, `sns`, `secretsmanager`, `cognito_idp`. |
+| `cognito_idp_subnet_ids`     | Private subnet IDs where the Cognito IDP endpoint was placed (AZ-filtered). |
 | `sqs_vpc_endpoint_network_interface_ids` | ENI IDs of the SQS Interface VPC Endpoint (one per private subnet). Passed to `modules/onprem_sim` for the SQS private zone. |
 | `gateway_endpoint_ids`       | Map service → endpoint ID for `s3`, `dynamodb`.                                            |
 
