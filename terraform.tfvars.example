@@ -25,7 +25,6 @@ processor_pollers     = 4
 # lab footprint minimal between testing sessions.
 enable_onprem_sim = true
 
-# Email address for SNS fraud alerts (native SNS email subscription, no SES required).
-# Leave empty to skip. When set, SNS sends a confirmation email that must be accepted
-# before alerts are delivered. Only messages with is_fraud=true in the body are forwarded.
-alert_email = ""
+# Interval for the scheduled fraud summary email. Subscribed users receive one
+# SNS email per interval only when fraudulent transactions were queued.
+fraud_alert_summary_interval_minutes = 7

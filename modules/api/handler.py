@@ -100,9 +100,19 @@ def _ensure_schema(conn):
                 activated_at       TIMESTAMPTZ,
                 disabled_at        TIMESTAMPTZ,
                 last_login_at      TIMESTAMPTZ,
+                summary_sns_subscription_arn        TEXT,
+                summary_sns_subscription_status     TEXT,
+                summary_sns_subscription_warning    TEXT,
+                summary_sns_subscription_updated_at TIMESTAMPTZ,
                 created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+
+            ALTER TABLE dashboard_access
+                ADD COLUMN IF NOT EXISTS summary_sns_subscription_arn TEXT,
+                ADD COLUMN IF NOT EXISTS summary_sns_subscription_status TEXT,
+                ADD COLUMN IF NOT EXISTS summary_sns_subscription_warning TEXT,
+                ADD COLUMN IF NOT EXISTS summary_sns_subscription_updated_at TIMESTAMPTZ;
 
             CREATE INDEX IF NOT EXISTS idx_dashboard_access_role
                 ON dashboard_access (role);
@@ -314,6 +324,138 @@ def _touch_access_row(cur, access_id, cognito_sub=None):
     return cur.fetchone()
 
 
+def _summary_topic_arn():
+    return os.getenv("SUMMARY_SNS_TOPIC_ARN") or ""
+
+
+def _subscribe_summary_email(email):
+    topic_arn = _summary_topic_arn()
+    if not topic_arn:
+        raise RuntimeError("SUMMARY_SNS_TOPIC_ARN is not configured")
+
+    client = boto3.client("sns", region_name=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"))
+    existing_arn = _find_summary_subscription_arn(client, topic_arn, email)
+    if existing_arn:
+        return existing_arn
+
+    response = client.subscribe(
+        TopicArn=topic_arn,
+        Protocol="email",
+        Endpoint=email,
+        ReturnSubscriptionArn=True,
+    )
+    return response.get("SubscriptionArn")
+
+
+def _find_summary_subscription_arn(client, topic_arn, email):
+    paginator = client.get_paginator("list_subscriptions_by_topic")
+    email_normalized = _normalize_email(email)
+    for page in paginator.paginate(TopicArn=topic_arn):
+        for subscription in page.get("Subscriptions", []):
+            if _normalize_email(subscription.get("Endpoint", "")) == email_normalized:
+                return subscription.get("SubscriptionArn")
+    return None
+
+
+def _unsubscribe_summary_email(subscription_arn):
+    if not subscription_arn:
+        return
+    client = boto3.client("sns", region_name=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"))
+    client.unsubscribe(SubscriptionArn=subscription_arn)
+
+
+def _set_summary_subscription(cur, access_id, *, subscription_arn=None, status, warning=None, clear_arn=False):
+    if clear_arn:
+        cur.execute(
+            """
+            UPDATE dashboard_access
+            SET summary_sns_subscription_arn = NULL,
+                summary_sns_subscription_status = %s,
+                summary_sns_subscription_warning = %s,
+                summary_sns_subscription_updated_at = NOW(),
+                updated_at = NOW()
+            WHERE id = %s
+            RETURNING *
+            """,
+            (status, warning, access_id),
+        )
+    else:
+        cur.execute(
+            """
+            UPDATE dashboard_access
+            SET summary_sns_subscription_arn = COALESCE(%s, summary_sns_subscription_arn),
+                summary_sns_subscription_status = %s,
+                summary_sns_subscription_warning = %s,
+                summary_sns_subscription_updated_at = NOW(),
+                updated_at = NOW()
+            WHERE id = %s
+            RETURNING *
+            """,
+            (subscription_arn, status, warning, access_id),
+        )
+    return cur.fetchone()
+
+
+def _try_subscribe_summary_for_access(cur, row):
+    if row.get("summary_sns_subscription_status") == "pending_confirmation":
+        return row
+    if row.get("summary_sns_subscription_arn"):
+        return row
+
+    try:
+        subscription_arn = _subscribe_summary_email(row["email"])
+    except Exception as exc:
+        logger.warning(
+            json.dumps(
+                {
+                    "action": "summary_sns_subscribe_failed",
+                    "access_id": str(row["id"]),
+                    "email": row["email_normalized"],
+                    "error": str(exc),
+                }
+            )
+        )
+        return _set_summary_subscription(
+            cur,
+            row["id"],
+            status="subscribe_failed",
+            warning=str(exc)[:500],
+        )
+
+    return _set_summary_subscription(
+        cur,
+        row["id"],
+        subscription_arn=subscription_arn,
+        status="pending_confirmation",
+    )
+
+
+def _try_subscribe_summary_standalone(email):
+    try:
+        subscription_arn = _subscribe_summary_email(email)
+    except Exception as exc:
+        logger.warning(
+            json.dumps(
+                {
+                    "action": "summary_sns_bootstrap_subscribe_failed",
+                    "email": _normalize_email(email),
+                    "error": str(exc),
+                }
+            )
+        )
+        return {
+            "email": email,
+            "status": "subscribe_failed",
+            "warning": str(exc)[:500],
+        }
+
+    return {
+        "email": email,
+        "subscription_arn": subscription_arn,
+        "status": "pending_confirmation",
+    }
+
+
 def _authorize_access(event, *, activate_pending=False):
     identity, error = _request_identity(event)
     if error is not None:
@@ -356,6 +498,7 @@ def _authorize_access(event, *, activate_pending=False):
                     (identity["cognito_sub"], row["id"]),
                 )
                 row = cur.fetchone()
+                row = _try_subscribe_summary_for_access(cur, row)
             else:
                 row = _touch_access_row(cur, row["id"], identity["cognito_sub"])
 
@@ -390,10 +533,13 @@ def _bootstrap_dashboard_admin(event):
     email_normalized = _normalize_email(email)
     display_name = payload.get("display_name")
     cognito_sub = payload.get("cognito_sub")
+    alert_email = payload.get("alert_email")
+    alert_email_normalized = _normalize_email(alert_email) if alert_email else ""
 
     conn = _get_conn()
     _ensure_schema(conn)
 
+    standalone_subscription = None
     with conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -429,12 +575,16 @@ def _bootstrap_dashboard_admin(event):
                     activated_at,
                     disabled_at,
                     last_login_at,
+                    summary_sns_subscription_arn,
+                    summary_sns_subscription_status,
+                    summary_sns_subscription_warning,
+                    summary_sns_subscription_updated_at,
                     created_at,
                     updated_at
                 )
                 VALUES (
                     %s, %s, %s, 'admin', 'active', %s, NULL, TRUE,
-                    NOW(), NOW(), NULL, NOW(), NOW(), NOW()
+                    NOW(), NOW(), NULL, NOW(), NULL, NULL, NULL, NULL, NOW(), NOW()
                 )
                 ON CONFLICT (email_normalized) DO UPDATE SET
                     email = EXCLUDED.email,
@@ -455,7 +605,15 @@ def _bootstrap_dashboard_admin(event):
             )
             row = cur.fetchone()
 
-    return _ok(_serialize_row(row))
+            if alert_email_normalized and alert_email_normalized == email_normalized:
+                row = _try_subscribe_summary_for_access(cur, row)
+            elif alert_email_normalized:
+                standalone_subscription = _try_subscribe_summary_standalone(alert_email_normalized)
+
+    data = _serialize_row(row)
+    if standalone_subscription is not None:
+        data["bootstrap_alert_subscription"] = standalone_subscription
+    return _ok(data)
 
 
 def _health():
@@ -801,6 +959,10 @@ def _upsert_dashboard_invite(access, body):
                         activated_at = NULL,
                         disabled_at = NULL,
                         last_login_at = NULL,
+                        summary_sns_subscription_arn = NULL,
+                        summary_sns_subscription_status = NULL,
+                        summary_sns_subscription_warning = NULL,
+                        summary_sns_subscription_updated_at = NULL,
                         updated_at = NOW()
                     WHERE id = %s
                     RETURNING *
@@ -879,6 +1041,34 @@ def _delete_dashboard_invite(access, invite_id):
                 (invite_id,),
             )
             row = cur.fetchone()
+
+            if row.get("summary_sns_subscription_arn"):
+                try:
+                    _unsubscribe_summary_email(row["summary_sns_subscription_arn"])
+                except Exception as exc:
+                    logger.warning(
+                        json.dumps(
+                            {
+                                "action": "summary_sns_unsubscribe_failed",
+                                "access_id": str(row["id"]),
+                                "email": row["email_normalized"],
+                                "error": str(exc),
+                            }
+                        )
+                    )
+                    row = _set_summary_subscription(
+                        cur,
+                        row["id"],
+                        status="unsubscribe_failed",
+                        warning=str(exc)[:500],
+                    )
+                else:
+                    row = _set_summary_subscription(
+                        cur,
+                        row["id"],
+                        status="unsubscribed",
+                        clear_arn=True,
+                    )
 
     return _ok(_serialize_row(row))
 

@@ -87,14 +87,14 @@ variable "enable_onprem_sim" {
   default     = true
 }
 
-variable "alert_email" {
-  description = "Dirección de email para recibir alertas de fraude vía SNS (protocolo email nativo de SNS). Cuando es vacío no se crea la suscripción. SNS envía un mail de confirmación al activar; el destinatario debe aceptarlo antes de recibir alertas."
-  type        = string
-  default     = ""
+variable "fraud_alert_summary_interval_minutes" {
+  description = "Intervalo, en minutos, para ejecutar el resumen programado de alertas de fraude."
+  type        = number
+  default     = 7
 
   validation {
-    condition     = var.alert_email == "" || can(regex("^[^@]+@[^@]+\\.[^@]+$", var.alert_email))
-    error_message = "alert_email debe ser una dirección de correo válida o quedar vacío."
+    condition     = var.fraud_alert_summary_interval_minutes >= 1 && var.fraud_alert_summary_interval_minutes <= 1440
+    error_message = "fraud_alert_summary_interval_minutes debe estar entre 1 y 1440 minutos."
   }
 }
 

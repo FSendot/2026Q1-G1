@@ -1,31 +1,50 @@
 # `modules/notification`
 
-Provisions the SNS topic that acts as the fan-out hub for fraud-scoring results. After the Fargate engine scores a transaction and publishes the result, SNS delivers the message to every subscriber independently: the results queue (for persistence in RDS), and optionally a direct email address for fraud alerts.
+Composition module for fraud-alert summaries. It owns three isolated submodules:
+
+- `topic` — SNS topic `<project>-fraud-summaries` where summary notifications are published.
+- `summary_queue` — SQS queue `<project>-fraud-alerts` and DLQ where fraudulent transaction results accumulate.
+- `summarizer` — EventBridge scheduled Lambda that drains the alert queue and publishes a compact summary to the SNS topic.
+
+The processor publishes all scoring results directly to `modules/results_writer` and sends only fraudulent results directly to `module.notification.fraud_alert_queue_url`. The summarizer runs on a fixed EventBridge interval, reads pending fraud alerts from SQS, publishes one summary message, and deletes the processed messages after a successful publish.
 
 ## Resources
 
-- `aws_sns_topic.results` — `<project>-results`. The central fan-out topic.
-- `aws_sns_topic_policy.results` — least-privilege policy:
-  - Allows the supplied `principal_arn` (LabRole) to publish and manage subscriptions.
-  - Allows the SNS service itself to publish (needed for internal delivery).
-  - Denies any publish over plain HTTP (`aws:SecureTransport = false`).
-- `aws_sns_topic_subscription.email_alert` _(conditional)_ — native SNS email subscription created only when `var.alert_email` is non-empty. Filters on `is_fraud = true` in the message body (`filter_policy_scope = "MessageBody"`), so only confirmed fraud events trigger an email. SNS sends a confirmation email to the address; the recipient must click the link before receiving alerts.
+- `module.topic.aws_sns_topic.summary` — `<project>-fraud-summaries`.
+- `module.topic.aws_sns_topic_policy.summary` — allows LabRole topic operations and denies insecure transport.
+- `module.summary_queue.aws_sqs_queue.main` — `<project>-fraud-alerts`, 4-day retention, 180 s visibility timeout, SSE-SQS.
+- `module.summary_queue.aws_sqs_queue.dlq` — `<project>-fraud-alerts-dlq`, 14-day retention.
+- `module.summary_queue.aws_sqs_queue_policy.main` — allows LabRole direct `sqs:SendMessage` plus consume, denies insecure transport.
+- `module.summarizer.aws_lambda_function.summarizer` — Python 3.12 scheduled summarizer in private subnets.
+- `module.summarizer.aws_cloudwatch_event_rule.schedule` — `rate(<summary_interval_minutes> minutes)`.
 
 ## Inputs
 
-| Name           | Type          | Default | Description                                                                                                                                   |
-| -------------- | ------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project`      | `string`      | n/a     | Prefix for resource names.                                                                                                                    |
-| `tags`         | `map(string)` | `{}`    | Common tags merged with `Component = "notification"`.                                                                                         |
-| `principal_arn`| `string`      | n/a     | IAM role ARN allowed to publish to the topic (LabRole in AWS Academy).                                                                        |
-| `alert_email`  | `string`      | `""`    | Email address for fraud alert notifications (SNS native email, no SES required). Leave empty to skip. Accepts a confirmation email on first use. |
+| Name                               | Type           | Default | Description |
+| ---------------------------------- | -------------- | ------- | ----------- |
+| `project`                          | `string`       | n/a     | Prefix for resource names. |
+| `tags`                             | `map(string)`  | `{}`    | Common tags merged with notification component tags. |
+| `principal_arn`                    | `string`       | n/a     | LabRole ARN used to operate SNS/SQS and execute the Lambda. |
+| `vpc_id`                           | `string`       | n/a     | VPC where the summarizer Lambda runs. |
+| `private_subnet_ids`               | `list(string)` | n/a     | Private subnets for the summarizer Lambda. |
+| `endpoint_security_group_id`       | `string`       | n/a     | Interface endpoint SG for Lambda egress to Logs, SQS, and SNS. |
+| `summary_interval_minutes`         | `number`       | `7`     | EventBridge schedule interval for summary publication. Root passes `var.fraud_alert_summary_interval_minutes`. |
+| `summarizer_max_messages_per_run`  | `number`       | `500`   | Maximum SQS messages drained by each scheduled run. |
+| `log_retention_days`               | `number`       | `30`    | CloudWatch log retention for the summarizer Lambda. |
 
 ## Outputs
 
-| Name         | Description                              |
-| ------------ | ---------------------------------------- |
-| `topic_arn`  | ARN of the SNS results topic.            |
-| `topic_name` | Name of the SNS results topic.           |
+| Name                              | Description |
+| --------------------------------- | ----------- |
+| `topic_arn`                       | ARN of the summary SNS topic. |
+| `topic_name`                      | Name of the summary SNS topic. |
+| `fraud_alert_queue_url`           | URL of the fraud-alert queue. |
+| `fraud_alert_queue_arn`           | ARN of the fraud-alert queue. |
+| `fraud_alert_queue_name`          | Name of the fraud-alert queue. |
+| `fraud_alert_dlq_arn`             | ARN of the fraud-alert DLQ. |
+| `summarizer_lambda_function_name` | Name of the scheduled summarizer Lambda. |
+| `summarizer_security_group_id`    | Security group ID of the summarizer Lambda. |
+| `summarizer_schedule_name`        | Name of the EventBridge schedule rule. |
 
 ## Example
 
@@ -33,24 +52,18 @@ Provisions the SNS topic that acts as the fan-out hub for fraud-scoring results.
 module "notification" {
   source = "./modules/notification"
 
-  project       = local.project
-  principal_arn = data.aws_iam_role.lab.arn
-  alert_email   = var.alert_email
-  tags          = local.common_tags
-}
-```
-
-Downstream modules subscribe to the topic by passing `module.notification.topic_arn`:
-
-```hcl
-module "results_writer" {
-  ...
-  sns_topic_arn = module.notification.topic_arn
+  project                    = local.project
+  principal_arn              = data.aws_iam_role.lab.arn
+  vpc_id                     = module.network.vpc_id
+  private_subnet_ids         = module.network.private_subnet_ids
+  endpoint_security_group_id = module.network.endpoint_security_group_id
+  summary_interval_minutes   = var.fraud_alert_summary_interval_minutes
+  tags                       = local.common_tags
 }
 ```
 
 ## Notes for AWS Academy
 
-- KMS-CMK for SNS is not available in Academy (Checkov `CKV_AWS_26` skipped). The topic is unencrypted at rest; messages are encrypted in transit (HTTPS enforced by the topic policy).
-- The email subscription uses SNS's native email protocol.
-- The filter policy uses `filter_policy_scope = "MessageBody"` to match on the JSON payload field `is_fraud`. This requires the publishing Fargate task to include `"is_fraud": true` in the message body.
+- KMS-CMK for SNS, SQS, and CloudWatch Logs is not available in Academy; resources use AWS-owned or SQS-managed encryption where supported.
+- `LabRole` is reused for Lambda execution and queue access because the lab restricts IAM role creation.
+- The Lambda is dependency-free and keeps failed publishes retryable by deleting SQS messages only after `sns:Publish` succeeds.

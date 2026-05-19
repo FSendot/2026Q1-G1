@@ -19,12 +19,8 @@ On-Prem VPC 192.168.0.0/16              AWS VPC 10.0.0.0/16 — solo subnets pri
           │ SQS sobre VPN               │  │ ECS Fargate (2 tasks)│              │
           └────────────────────────────▶│  │    scoring engine    │◀── ECR image │
                                         │  └──────────┬───────────┘              │
-                                        │             │ Publish to SNS           │
-                                        │             ▼                          │
-                                        │  ┌──────────────────────┐              │
-                                        │  │      SNS Topic       │              │
-                                        │  └──────────┬───────────┘              │
-                                        │             │ SQS Subscribe to SNS     │
+                                        │             │ Send result to SQS       │
+                                        │             │ Send fraud to alerts SQS │
                                         │             ▼                          │
                                         │  ┌───────────────────────┐             │
                                         │  │   SQS Queue results   │             │
@@ -66,10 +62,11 @@ On-Prem VPC 192.168.0.0/16              AWS VPC 10.0.0.0/16 — solo subnets pri
 
 1. Un productor on-prem envía una transacción JSON al SQS de ingesta a través del túnel VPN, este JSON contiene información de la transacción y el usuario.
 2. Fargate consume el mensaje, consulta el perfil del usuario en DynamoDB y calcula el fraud score
-3. El resultado se publica en SNS, que lo distribuye a una cola SQS de resultados
-4. La Lambda `results-writer` toma el mensaje de SQS y persiste el resultado en RDS vía RDS Proxy
-5. La Lambda `api` expone esos datos a través de API Gateway
-6. El dashboard (S3 website) consume la API y muestra el estado en tiempo real
+3. El resultado se envía directo al SQS de resultados; si es fraude, también se encola en el SQS de alertas
+4. La Lambda `results-writer` toma el mensaje de resultados de SQS y persiste el resultado en RDS vía RDS Proxy
+5. La Lambda `fraud-summary` se ejecuta cada `fraud_alert_summary_interval_minutes`, resume los fraudes pendientes y publica un único email vía SNS
+6. La Lambda `api` expone esos datos a través de API Gateway
+7. El dashboard (S3 website) consume la API y muestra el estado en tiempo real
 
 ---
 
@@ -110,29 +107,27 @@ Toda la capa de persistencia del sistema en un único módulo:
 
 ### `modules/compute`
 
-Motor de scoring corriendo en ECS Fargate. Lee transacciones de SQS, consulta DynamoDB, aplica el modelo ML (con fallback a reglas si el modelo no está disponible), y publica el resultado en SNS.
+Motor de scoring corriendo en ECS Fargate. Lee transacciones de SQS, consulta DynamoDB, aplica el modelo ML (con fallback a reglas si el modelo no está disponible), publica todos los resultados en la cola de persistencia, y publica sólo fraudes en la cola de resúmenes.
 
 **Recursos:** [`aws_ecr_repository.app`](modules/compute/main.tf#L48), [`aws_ecs_cluster.main`](modules/compute/main.tf#L78) (Container Insights en el cluster), [`aws_ecs_task_definition.app`](modules/compute/main.tf#L142), [`aws_ecs_service.app`](modules/compute/main.tf#L165), Application Auto Scaling ([`aws_appautoscaling_target`](modules/compute/main.tf#L194), [`aws_appautoscaling_policy`](modules/compute/main.tf#L204)).
 
 **Auto Scaling**: política de target tracking con métrica compuesta `messages_per_task = ApproximateNumberOfMessagesVisible / max(RunningTaskCount, 1)`. Si el backlog supera 10 mensajes por task, escala horizontalmente hasta 10 tasks.
 
-**Variables de entorno del contenedor**: `QUEUE_URL`, `SNS_TOPIC_ARN`, `DYNAMODB_TABLE_NAME`, `AWS_REGION`, `S3_AUDIT_BUCKET`.
+**Variables de entorno del contenedor**: `QUEUE_URL`, `RESULTS_QUEUE_URL`, `FRAUD_ALERT_QUEUE_URL`, `DYNAMODB_TABLE_NAME`, `AWS_REGION`, `S3_AUDIT_BUCKET`.
 
 ---
 
 ### `modules/notification`
 
-Topic SNS que actúa como hub de distribución de resultados. Cuando el fraud processor publica un resultado, SNS lo entrega simultáneamente a:
-- La cola SQS de resultados (para persistencia en RDS) — suscripción [`aws_sns_topic_subscription.results_sqs`](modules/results_writer/main.tf#L119) en `modules/results_writer`
-- Una suscripción de email opcional, filtrada a `is_fraud = true` (usando `filter_policy_scope = "MessageBody"`)
+Composición de alertas resumidas. El processor no publica resultados crudos en SNS: encola sólo los fraudes en `itba-tp-fraud-fraud-alerts`, una Lambda programada cada `fraud_alert_summary_interval_minutes` minutos genera un resumen, y SNS lo distribuye a los emails confirmados.
 
-**Recursos:** [`aws_sns_topic.results`](modules/notification/main.tf#L9), [`aws_sns_topic_policy.results`](modules/notification/main.tf#L65), [`aws_sns_topic_subscription.email_alert`](modules/notification/main.tf#L70)
+**Recursos:** submódulos [`topic`](modules/notification/topic/main.tf), [`summary_queue`](modules/notification/summary_queue/main.tf) y [`summarizer`](modules/notification/summarizer/main.tf).
 
 ---
 
 ### `modules/results_writer`
 
-Pipeline SNS → SQS → Lambda para persistir resultados en RDS.
+Pipeline SQS → Lambda para persistir resultados en RDS. El processor envía cada resultado directamente a esta cola.
 
 **Recursos:**
 - SQS `itba-tp-fraud-results-events` + DLQ: [`aws_sqs_queue.results`](modules/results_writer/main.tf#L35) + [`aws_sqs_queue.results_dlq`](modules/results_writer/main.tf#L14) ([`aws_sqs_queue_redrive_allow_policy.results_dlq`](modules/results_writer/main.tf#L26), [`aws_sqs_queue_policy.results`](modules/results_writer/main.tf#L114)) — buffer con `maxReceiveCount = 3` y visibility timeout de 180s (≥6× el timeout de la Lambda)
@@ -285,7 +280,8 @@ Outputs relevantes:
 | `dashboard_website_url` | Endpoint HTTP de S3 website; no usar como entrada de Cognito |
 | `api_endpoint` | URL base de la API REST |
 | `queue_url` | URL de la cola SQS de ingesta (on-prem envía aquí) |
-| `sns_topic_arn` | ARN del topic SNS de resultados |
+| `sns_topic_arn` | ARN del topic SNS de resúmenes de fraude |
+| `fraud_alert_queue_url` | URL de la cola SQS que alimenta los resúmenes de fraude |
 | `vpn_gateway_public_ip` | IP pública del router on-prem (strongSwan) |
 | `db_password` | Contraseña RDS generada (sensible, usar `-raw`) |
 
@@ -466,12 +462,12 @@ Los secrets necesarios en GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, 
 │   ├── data_store/          # DynamoDB + RDS + RDS Proxy + Secrets Manager
 │   ├── compute/             # ECR + ECS Fargate + Auto Scaling
 │   ├── onprem_sim/          # VPC on-prem + strongSwan EC2 + VPN site-to-site
-│   ├── notification/        # SNS topic + suscripción email opcional
-│   ├── results_writer/      # SQS resultados + Lambda writer (SNS→SQS→Lambda→RDS)
+│   ├── notification/        # SNS resumen + SQS alertas + Lambda summarizer
+│   ├── results_writer/      # SQS resultados + Lambda writer (processor→SQS→Lambda→RDS)
 │   ├── api/                 # Lambda API + HTTP API Gateway
 │   └── dashboard/           # S3 bucket + website config + config.js templating
 ├── app/
-│   ├── processor/           # Motor de scoring en Go (SQS consumer → SNS publisher)
+│   ├── processor/           # Motor de scoring en Go (SQS consumer → SQS publishers)
 │   ├── api/                 # API Flask (referencia/CI check, no deployada como Lambda)
 │   └── dashboard/           # Frontend vanilla JS (index.html, app.js)
 ├── layers/

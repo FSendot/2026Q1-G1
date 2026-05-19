@@ -167,6 +167,7 @@ def main():
     parser.add_argument("--email", required=True, help="Bootstrap admin email.")
     parser.add_argument("--password", default="", help="Optional permanent Cognito password.")
     parser.add_argument("--display-name", default="Bootstrap Admin")
+    parser.add_argument("--alert-email", default="", help="Optional SNS summary alert email.")
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--user-pool-id", default="")
     parser.add_argument("--lambda-function", default="")
@@ -175,6 +176,9 @@ def main():
     email = normalize_email(args.email)
     if "@" not in email:
         raise SystemExit("bootstrap email must be a valid email address")
+    alert_email = normalize_email(args.alert_email) if args.alert_email else ""
+    if alert_email and "@" not in alert_email:
+        raise SystemExit("bootstrap alert email must be a valid email address")
 
     user_pool_id = args.user_pool_id or terraform_output("cognito_user_pool_id") or terraform_output("user_pool_id")
     function_name = args.lambda_function or terraform_output("api_lambda_name")
@@ -198,6 +202,7 @@ def main():
         "email": email,
         "display_name": args.display_name,
         "cognito_sub": cognito_sub,
+        "alert_email": alert_email,
     }
     body = invoke_bootstrap_lambda(function_name, payload, args.region)
     print(json.dumps(body, indent=2, sort_keys=True))

@@ -53,26 +53,7 @@ resource "aws_sqs_queue" "results" {
 
 data "aws_iam_policy_document" "results_queue" {
   statement {
-    sid    = "AllowSNSPublish"
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["sns.amazonaws.com"]
-    }
-
-    actions   = ["sqs:SendMessage"]
-    resources = [aws_sqs_queue.results.arn]
-
-    condition {
-      test     = "ArnEquals"
-      variable = "aws:SourceArn"
-      values   = [var.sns_topic_arn]
-    }
-  }
-
-  statement {
-    sid    = "AllowLabRoleConsume"
+    sid    = "AllowLabRoleSendAndConsume"
     effect = "Allow"
 
     principals {
@@ -81,6 +62,7 @@ data "aws_iam_policy_document" "results_queue" {
     }
 
     actions = [
+      "sqs:SendMessage",
       "sqs:ReceiveMessage",
       "sqs:DeleteMessage",
       "sqs:GetQueueAttributes",
@@ -114,12 +96,6 @@ data "aws_iam_policy_document" "results_queue" {
 resource "aws_sqs_queue_policy" "results" {
   queue_url = aws_sqs_queue.results.id
   policy    = data.aws_iam_policy_document.results_queue.json
-}
-
-resource "aws_sns_topic_subscription" "results_sqs" {
-  topic_arn = var.sns_topic_arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.results.arn
 }
 
 resource "aws_cloudwatch_log_group" "writer" {

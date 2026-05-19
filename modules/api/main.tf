@@ -84,12 +84,13 @@ resource "aws_lambda_function" "api" {
 
   environment {
     variables = {
-      DB_HOST           = var.db_host
-      DB_PORT           = tostring(var.db_port)
-      DB_NAME           = var.db_name
-      DB_USER           = var.db_username
-      DB_PASSWORD       = var.db_password
-      AUTH_LOCAL_BYPASS = "false"
+      DB_HOST               = var.db_host
+      DB_PORT               = tostring(var.db_port)
+      DB_NAME               = var.db_name
+      DB_USER               = var.db_username
+      DB_PASSWORD           = var.db_password
+      SUMMARY_SNS_TOPIC_ARN = var.sns_topic_arn
+      AUTH_LOCAL_BYPASS     = "false"
     }
   }
 

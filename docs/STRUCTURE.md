@@ -33,8 +33,8 @@
 │   ├── data_store/       # DynamoDB user-behavior table + RDS PostgreSQL fraud results
 │   ├── compute/          # ECR, ECS Cluster, Fargate service, Application Auto Scaling
 │   ├── onprem_sim/       # On-prem VPC simulation: strongSwan EC2, CGW, Site-to-Site VPN
-│   ├── notification/     # SNS results topic + optional email subscription (fan-out hub)
-│   ├── results_writer/   # SQS results queue + Lambda writer (SNS → SQS → Lambda → RDS)
+│   ├── notification/     # Fraud-alert summary composition: SNS topic, SQS queue, scheduled summarizer Lambda
+│   ├── results_writer/   # SQS results queue + Lambda writer (processor → SQS → Lambda → RDS)
 │   └── api/              # Lambda + HTTP API Gateway (Cognito-protected dashboard API)
 │       ├── main.tf
 │       ├── variables.tf

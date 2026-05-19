@@ -147,8 +147,13 @@ variable "table_name" {
   type        = string
 }
 
-variable "sns_topic_arn" {
-  description = "ARN del topic SNS donde el contenedor publica los resultados de scoring; pasado como variable de entorno SNS_TOPIC_ARN."
+variable "results_queue_url" {
+  description = "URL de la cola SQS donde el contenedor publica todos los resultados de scoring."
+  type        = string
+}
+
+variable "fraud_alert_queue_url" {
+  description = "URL de la cola SQS donde el contenedor publica sólo resultados fraudulentos para resumen."
   type        = string
 }
 

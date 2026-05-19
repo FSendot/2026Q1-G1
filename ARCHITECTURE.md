@@ -27,8 +27,8 @@ Hard constraints driving the design:
 | DynamoDB `user_behavior` table         | `modules/data_store` | custom    | PK `user_id` (string), `PAY_PER_REQUEST`, SSE on, PITR on. Input to scoring.                                   |
 | RDS PostgreSQL `fraud_results` DB      | `modules/data_store` | custom    | PostgreSQL 17.4, `db.t3.micro`, private subnets, encrypted. Output of scoring. Single-AZ lab configuration.    |
 | RDS Proxy                              | `modules/data_store` | custom    | Connection pool between Lambdas and RDS. `require_tls = true`, `iam_auth = DISABLED`, credentials via Secrets Manager. Prevents connection exhaustion on `db.t3.micro`.  |
-| SNS results topic                      | `modules/notification` | custom  | Fan-out hub: `<project>-results`. Delivers to SQS (buffered) and optionally to email (direct, `is_fraud=true` filter). |
-| SQS results queue + DLQ                | `modules/results_writer` | custom | Buffer between SNS and the writer Lambda. `maxReceiveCount = 3`, visibility timeout 180 s.                   |
+| SNS summary topic + alert SQS + summarizer | `modules/notification` | custom | Summary-only alerting path: fraud events accumulate in SQS, EventBridge triggers a Lambda every `fraud_alert_summary_interval_minutes`, and SNS emails one summary to confirmed subscribers. |
+| SQS results queue + DLQ                | `modules/results_writer` | custom | Direct buffer between the processor and writer Lambda. `maxReceiveCount = 3`, visibility timeout 180 s.                   |
 | Lambda results-writer                  | `modules/results_writer` | custom | Python 3.12, in VPC, triggered by SQS. Connects to RDS via RDS Proxy with a psycopg2 layer.     |
 | HTTP API Gateway + Lambda              | `modules/api`        | custom    | `GET /transactions`, `GET /stats`, `GET /health`. Lambda in VPC reaches RDS via RDS Proxy. Stays serverless instead of an always-running Fargate service. |
 | ECR repo                               | `modules/compute`  | custom    | `MUTABLE` tags, scan-on-push.                                                                                   |
@@ -44,18 +44,19 @@ Hard constraints driving the design:
 **Ingestion and scoring:**
 
 1. A producer (out of scope) calls `SendMessage` on the SQS main queue using the SQS Interface VPC Endpoint.
-2. Fargate tasks consume from the queue, look up the user's behaviour features in DynamoDB via the DynamoDB Gateway Endpoint, run the scoring model, and publish the result to the SNS results topic via the SNS Interface VPC Endpoint.
+2. Fargate tasks consume from the queue, look up the user's behaviour features in DynamoDB via the DynamoDB Gateway Endpoint, run the scoring model, and send every result to the results SQS queue.
 3. Failures on the ingestion queue are retried via SQS visibility timeout. After `maxReceiveCount = 5` deliveries, the message moves to the ingestion DLQ.
 4. CloudWatch Logs receives container logs through the Logs Interface Endpoint.
 5. ECR holds the container image, pulled through ECR API + DKR Endpoints.
 6. Application Auto Scaling reads the queue depth and the running task count and adjusts `desired_count` so the queue stays close to the target backlog per task.
 
-**Post-analysis (fan-out from SNS):**
+**Post-analysis and notification summaries:**
 
-7. SNS delivers the fraud result to the results SQS queue (`modules/results_writer`). The SQS buffer decouples the writer Lambda from SNS and provides automatic retries (up to 3) before moving messages to the results DLQ.
-8. The results-writer Lambda is triggered by the SQS event source mapping, parses the SNS envelope, and writes the fraud result to RDS PostgreSQL via RDS Proxy (`modules/data_store`).
-9. The dashboard Lambda (`modules/api`) is invoked by API Gateway (`GET /transactions`) and queries RDS via RDS Proxy to serve fraud results to the dashboard client.
-10. When `var.alert_email` is set, SNS also delivers directly to the email subscription — filtered to `is_fraud = true` messages only.
+7. The results-writer Lambda is triggered by the SQS event source mapping and writes each fraud result to RDS PostgreSQL via RDS Proxy (`modules/data_store`).
+8. If a scored transaction is fraudulent, the processor also sends it to the fraud-alert SQS queue (`modules/notification`).
+9. The scheduled summarizer Lambda drains pending fraud alerts, publishes one compact SNS summary, and deletes messages only after `sns:Publish` succeeds.
+10. The dashboard Lambda (`modules/api`) is invoked by API Gateway (`GET /transactions`) and queries RDS via RDS Proxy to serve fraud results to the dashboard client.
+11. Dashboard invitations manage SNS email subscriptions: first successful activation requests a pending-confirmation subscription, and admin removal attempts unsubscribe after disabling access.
 
 There is **no public ingress** to the AWS VPC. The VGW is attached and route propagation is enabled. When `var.enable_onprem_sim = true` (default), `modules/onprem_sim` provisions a separate `192.168.0.0/16` VPC with one EC2 instance running strongSwan + Quagga BGP, plus the `aws_customer_gateway` and `aws_vpn_connection` that bring up two BGP-based IPsec tunnels against the VGW. The strongSwan EC2 itself is deployed by embedding `templates/vpn-gateway-strongswan.yml` inside an `aws_cloudformation_stack`, with PSKs delivered through AWS Secrets Manager.
 

@@ -69,13 +69,18 @@ output "log_group_name" {
 }
 
 output "sns_topic_arn" {
-  description = "ARN del topic SNS de resultados de fraude."
+  description = "ARN del topic SNS de resúmenes de fraude."
   value       = module.notification.topic_arn
 }
 
 output "results_queue_url" {
-  description = "URL de la cola SQS de resultados (buffer SNS → Lambda writer)."
+  description = "URL de la cola SQS de resultados (processor → SQS → Lambda writer)."
   value       = module.results_writer.queue_url
+}
+
+output "fraud_alert_queue_url" {
+  description = "URL de la cola SQS donde el processor encola eventos fraudulentos para resumen."
+  value       = module.notification.fraud_alert_queue_url
 }
 
 output "results_dlq_arn" {

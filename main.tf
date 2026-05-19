@@ -95,12 +95,13 @@ module "compute" {
   processor_concurrency = var.processor_concurrency
   processor_pollers     = var.processor_pollers
 
-  queue_arn         = module.queue.queue_arn
-  queue_url         = module.queue.queue_url
-  queue_name        = module.queue.queue_name
-  table_name        = module.data_store.table_name
-  sns_topic_arn     = module.notification.topic_arn
-  audit_bucket_name = module.data_store.audit_bucket_name
+  queue_arn             = module.queue.queue_arn
+  queue_url             = module.queue.queue_url
+  queue_name            = module.queue.queue_name
+  table_name            = module.data_store.table_name
+  results_queue_url     = module.results_writer.queue_url
+  fraud_alert_queue_url = module.notification.fraud_alert_queue_url
+  audit_bucket_name     = module.data_store.audit_bucket_name
 }
 
 resource "random_password" "db" {
@@ -123,10 +124,13 @@ resource "aws_lambda_layer_version" "psycopg2" {
 module "notification" {
   source = "./modules/notification"
 
-  project       = local.project
-  principal_arn = data.aws_iam_role.lab.arn
-  alert_email   = var.alert_email
-  tags          = local.common_tags
+  project                    = local.project
+  principal_arn              = data.aws_iam_role.lab.arn
+  vpc_id                     = module.network.vpc_id
+  private_subnet_ids         = module.network.private_subnet_ids
+  endpoint_security_group_id = module.network.endpoint_security_group_id
+  summary_interval_minutes   = var.fraud_alert_summary_interval_minutes
+  tags                       = local.common_tags
 }
 
 module "results_writer" {
@@ -137,7 +141,6 @@ module "results_writer" {
   vpc_id                     = module.network.vpc_id
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
-  sns_topic_arn              = module.notification.topic_arn
   psycopg2_layer_arn         = aws_lambda_layer_version.psycopg2.arn
   db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port
@@ -172,6 +175,7 @@ module "api" {
   db_name                    = module.data_store.db_name
   db_username                = module.data_store.db_username
   db_password                = random_password.db.result
+  sns_topic_arn              = module.notification.topic_arn
   jwt_issuer                 = module.auth.issuer
   jwt_audience               = module.auth.client_id
   tags                       = local.common_tags

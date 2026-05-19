@@ -18,7 +18,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	dynamosvc "github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
@@ -45,7 +44,7 @@ type Transaction struct {
 	Features           map[string]float64 `json:"features,omitempty"`
 }
 
-// ScoringResult is published to SNS after scoring.
+// ScoringResult is published to the results queues after scoring.
 type ScoringResult struct {
 	TransactionID string  `json:"transaction_id"`
 	UserID        string  `json:"user_id"`
@@ -55,6 +54,7 @@ type ScoringResult struct {
 	Channel       string  `json:"channel"`
 	FraudScore    float64 `json:"fraud_score"`
 	IsFraud       bool    `json:"is_fraud"`
+	ProcessedAt   string  `json:"processed_at,omitempty"`
 }
 
 // AuditEvent is written to S3 for full traceability.
@@ -78,6 +78,17 @@ func (s *userLockSet) lock(userID string) func() {
 // scorer abstracts ML engine and rule-based fallback behind a single interface.
 type scorer interface {
 	score(ctx context.Context, tx Transaction, profile *dynamo.UserProfile) (fraudScore float64, isFraud bool)
+}
+
+type queueClient interface {
+	ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+	SendMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error)
+}
+
+type profileStore interface {
+	GetProfile(ctx context.Context, userID string) (*dynamo.UserProfile, error)
+	UpdateProfile(ctx context.Context, profile *dynamo.UserProfile, amount float64, country, channel, destination, timestamp string) error
 }
 
 // mlScorer uses the trained Go runtime loaded from runtime_spec.json.
@@ -120,7 +131,6 @@ func main() {
 
 	dynamoClient := dynamo.NewClient(dynamosvc.NewFromConfig(cfg))
 	sqsClient := sqs.NewFromConfig(cfg)
-	snsClient := sns.NewFromConfig(cfg)
 
 	var s3Client *store.S3Client
 	if os.Getenv("S3_AUDIT_BUCKET") != "" {
@@ -136,12 +146,14 @@ func main() {
 	engine := resolveScorer()
 
 	queueURL := mustEnv("QUEUE_URL")
-	topicARN := mustEnv("SNS_TOPIC_ARN")
+	resultsQueueURL := mustEnv("RESULTS_QUEUE_URL")
+	fraudAlertQueueURL := mustEnv("FRAUD_ALERT_QUEUE_URL")
 	processorConcurrency := envInt("PROCESSOR_CONCURRENCY", 32, 1, 512)
 	processorPollers := envInt("PROCESSOR_POLLERS", 4, 1, 64)
 
-	log.Printf("worker started — queue=%s topic=%s concurrency=%d pollers=%d", queueURL, topicARN, processorConcurrency, processorPollers)
-	runLoop(ctx, sqsClient, snsClient, dynamoClient, s3Client, engine, queueURL, topicARN, processorConcurrency, processorPollers)
+	log.Printf("worker started — queue=%s results_queue=%s fraud_alert_queue=%s concurrency=%d pollers=%d",
+		queueURL, resultsQueueURL, fraudAlertQueueURL, processorConcurrency, processorPollers)
+	runLoop(ctx, sqsClient, dynamoClient, s3Client, engine, queueURL, resultsQueueURL, fraudAlertQueueURL, processorConcurrency, processorPollers)
 }
 
 // resolveScorer loads the ML engine when runtime_spec.json is available,
@@ -165,12 +177,11 @@ func resolveScorer() scorer {
 
 func runLoop(
 	ctx context.Context,
-	sqsClient *sqs.Client,
-	snsClient *sns.Client,
-	dynamoClient *dynamo.Client,
+	sqsClient queueClient,
+	dynamoClient profileStore,
 	s3Client *store.S3Client,
 	engine scorer,
-	queueURL, topicARN string,
+	queueURL, resultsQueueURL, fraudAlertQueueURL string,
 	processorConcurrency, processorPollers int,
 ) {
 	jobs := make(chan sqstypes.Message, processorConcurrency*10)
@@ -180,7 +191,7 @@ func runLoop(
 	for workerID := range processorConcurrency {
 		workers.Go(func() {
 			for msg := range jobs {
-				if err := processMessage(ctx, msg, sqsClient, snsClient, dynamoClient, s3Client, engine, userLocks, queueURL, topicARN); err != nil {
+				if err := processMessage(ctx, msg, sqsClient, dynamoClient, s3Client, engine, userLocks, queueURL, resultsQueueURL, fraudAlertQueueURL); err != nil {
 					log.Printf("processing error worker=%d receipt=%s: %v", workerID, aws.ToString(msg.ReceiptHandle), err)
 					// Do not delete — visibility timeout expires and the message retries.
 					// After maxReceiveCount it lands in the DLQ.
@@ -216,13 +227,12 @@ func runLoop(
 func processMessage(
 	ctx context.Context,
 	msg sqstypes.Message,
-	sqsClient *sqs.Client,
-	snsClient *sns.Client,
-	dynamoClient *dynamo.Client,
+	sqsClient queueClient,
+	dynamoClient profileStore,
 	s3Client *store.S3Client,
 	engine scorer,
 	userLocks *userLockSet,
-	queueURL, topicARN string,
+	queueURL, resultsQueueURL, fraudAlertQueueURL string,
 ) error {
 	var tx Transaction
 	if err := json.Unmarshal([]byte(aws.ToString(msg.Body)), &tx); err != nil {
@@ -263,32 +273,58 @@ func processMessage(
 		Channel:       tx.Channel,
 		FraudScore:    fraudScore,
 		IsFraud:       isFraud,
+		ProcessedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if s3Client != nil {
 		audit := AuditEvent{
 			Transaction:   tx,
 			ScoringResult: result,
-			ProcessedAt:   time.Now().UTC().Format(time.RFC3339),
+			ProcessedAt:   result.ProcessedAt,
 		}
 		if err := s3Client.PutRawEvent(ctx, tx.TransactionID, audit); err != nil {
 			log.Printf("s3 audit error tx=%s: %v", tx.TransactionID, err)
 		}
 	}
 
-	payload, _ := json.Marshal(result)
-
-	if _, err := snsClient.Publish(ctx, &sns.PublishInput{
-		TopicArn: aws.String(topicARN),
-		Message:  aws.String(string(payload)),
-	}); err != nil {
-		return fmt.Errorf("sns publish tx=%s: %w", tx.TransactionID, err)
+	if err := publishScoringResult(ctx, sqsClient, resultsQueueURL, fraudAlertQueueURL, result); err != nil {
+		return err
 	}
 
 	deleteMessage(ctx, sqsClient, queueURL, msg.ReceiptHandle)
 
 	log.Printf("processed tx=%s user=%s fraud_score=%.4f is_fraud=%v",
 		tx.TransactionID, tx.UserID, fraudScore, isFraud)
+
+	return nil
+}
+
+func publishScoringResult(
+	ctx context.Context,
+	sqsClient queueClient,
+	resultsQueueURL, fraudAlertQueueURL string,
+	result ScoringResult,
+) error {
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal scoring result tx=%s: %w", result.TransactionID, err)
+	}
+
+	if _, err := sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:    aws.String(resultsQueueURL),
+		MessageBody: aws.String(string(payload)),
+	}); err != nil {
+		return fmt.Errorf("sqs send result tx=%s queue=%s: %w", result.TransactionID, resultsQueueURL, err)
+	}
+
+	if result.IsFraud {
+		if _, err := sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
+			QueueUrl:    aws.String(fraudAlertQueueURL),
+			MessageBody: aws.String(string(payload)),
+		}); err != nil {
+			return fmt.Errorf("sqs send fraud alert tx=%s queue=%s: %w", result.TransactionID, fraudAlertQueueURL, err)
+		}
+	}
 
 	return nil
 }
@@ -367,7 +403,7 @@ func buildMLFeatures(tx Transaction, featureOrder []string) map[string]float64 {
 	return features
 }
 
-func deleteMessage(ctx context.Context, sqsClient *sqs.Client, queueURL string, receiptHandle *string) {
+func deleteMessage(ctx context.Context, sqsClient queueClient, queueURL string, receiptHandle *string) {
 	if _, err := sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(queueURL),
 		ReceiptHandle: receiptHandle,

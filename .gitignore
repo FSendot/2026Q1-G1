@@ -49,6 +49,7 @@ __pycache__/
 .pre-commit-cache/
 .tools/
 .virtualenv-app-data/
+.gocache/
 
 # Lambda deployment packages generados por archive_file (data source de Terraform)
 **/handler.zip

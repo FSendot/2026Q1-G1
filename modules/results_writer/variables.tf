@@ -44,11 +44,6 @@ variable "endpoint_security_group_id" {
   type        = string
 }
 
-variable "sns_topic_arn" {
-  description = "ARN del topic SNS de resultados al que se suscribe la cola SQS de este módulo."
-  type        = string
-}
-
 variable "psycopg2_layer_arn" {
   description = "ARN del Lambda layer con psycopg2 compilado para Amazon Linux 2023 (Python 3.12)."
   type        = string

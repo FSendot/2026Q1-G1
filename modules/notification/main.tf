@@ -1,81 +1,31 @@
-locals {
-  module_tags = merge(var.tags, {
-    Component = "notification"
-  })
+module "topic" {
+  source = "./topic"
 
-  topic_name = format("%s-results", var.project)
+  project       = var.project
+  principal_arn = var.principal_arn
+  tags          = var.tags
 }
 
-resource "aws_sns_topic" "results" {
-  # checkov:skip=CKV_AWS_26: AWS Academy no permite KMS CMK; cifrado gestionado por AWS cumple el requisito at-rest.
-  name = local.topic_name
+module "summary_queue" {
+  source = "./summary_queue"
 
-  tags = merge(local.module_tags, {
-    Name = local.topic_name
-  })
+  project       = var.project
+  principal_arn = var.principal_arn
+  tags          = var.tags
 }
 
-data "aws_iam_policy_document" "results" {
-  statement {
-    sid    = "AllowLabRolePublish"
-    effect = "Allow"
+module "summarizer" {
+  source = "./summarizer"
 
-    principals {
-      type        = "AWS"
-      identifiers = [var.principal_arn]
-    }
-
-    actions   = ["sns:Publish", "sns:Subscribe", "sns:GetTopicAttributes"]
-    resources = [aws_sns_topic.results.arn]
-  }
-
-  statement {
-    sid    = "AllowSNSServiceDelivery"
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["sns.amazonaws.com"]
-    }
-
-    actions   = ["sns:Publish"]
-    resources = [aws_sns_topic.results.arn]
-  }
-
-  statement {
-    sid    = "DenyInsecureTransport"
-    effect = "Deny"
-
-    principals {
-      type        = "AWS"
-      identifiers = ["*"]
-    }
-
-    actions   = ["sns:Publish"]
-    resources = [aws_sns_topic.results.arn]
-
-    condition {
-      test     = "Bool"
-      variable = "aws:SecureTransport"
-      values   = ["false"]
-    }
-  }
-}
-
-resource "aws_sns_topic_policy" "results" {
-  arn    = aws_sns_topic.results.arn
-  policy = data.aws_iam_policy_document.results.json
-}
-
-resource "aws_sns_topic_subscription" "email_alert" {
-  count = var.alert_email != "" ? 1 : 0
-
-  topic_arn = aws_sns_topic.results.arn
-  protocol  = "email"
-  endpoint  = var.alert_email
-
-  filter_policy_scope = "MessageBody"
-  filter_policy = jsonencode({
-    is_fraud = [true]
-  })
+  project                         = var.project
+  principal_arn                   = var.principal_arn
+  vpc_id                          = var.vpc_id
+  private_subnet_ids              = var.private_subnet_ids
+  endpoint_security_group_id      = var.endpoint_security_group_id
+  fraud_alert_queue_url           = module.summary_queue.queue_url
+  summary_topic_arn               = module.topic.topic_arn
+  summary_interval_minutes        = var.summary_interval_minutes
+  summarizer_max_messages_per_run = var.summarizer_max_messages_per_run
+  log_retention_days              = var.log_retention_days
+  tags                            = var.tags
 }

@@ -78,6 +78,16 @@ variable "db_password" {
   sensitive   = true
 }
 
+variable "sns_topic_arn" {
+  description = "ARN del topic SNS de resúmenes usado para suscripciones email del dashboard."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws:sns:[a-z0-9-]+:\\d{12}:.+$", var.sns_topic_arn))
+    error_message = "sns_topic_arn debe ser un ARN válido de SNS."
+  }
+}
+
 variable "jwt_issuer" {
   description = "Issuer del JWT de Cognito usado por el authorizer HTTP API."
   type        = string
