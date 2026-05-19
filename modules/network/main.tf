@@ -54,16 +54,10 @@ data "aws_vpc_endpoint_service" "cognito_idp" {
   service = "cognito-idp"
 }
 
-data "aws_subnet" "private" {
-  for_each = toset(module.vpc.private_subnets)
-  id       = each.value
-}
-
 locals {
   cognito_idp_subnet_ids = [
-    for subnet_id, subnet in data.aws_subnet.private :
-    subnet_id
-    if contains(data.aws_vpc_endpoint_service.cognito_idp.availability_zones, subnet.availability_zone)
+    for i, az in var.azs : module.vpc.private_subnets[i]
+    if contains(data.aws_vpc_endpoint_service.cognito_idp.availability_zones, az)
   ]
 }
 

@@ -1,10 +1,10 @@
-name: Apply
+name: Terraform Apply
 
 on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Escribir "apply" para confirmar el deploy'
+        description: 'Escribir "apply" para aplicar solo infraestructura (sin imagen ni dashboard)'
         required: true
         type: string
 
@@ -13,15 +13,12 @@ permissions:
 
 jobs:
   apply:
-    name: Terraform Apply
+    name: Infrastructure only
     runs-on: ubuntu-latest
     if: github.event.inputs.confirm == 'apply'
 
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
-      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
       TF_VAR_google_oauth_client_id: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       TF_VAR_google_oauth_client_secret: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       BOOTSTRAP_EMAIL: ${{ secrets.BOOTSTRAP_EMAIL }}
@@ -35,6 +32,13 @@ jobs:
         with:
           terraform_version: "~> 1.9"
 
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: app/results_writer/go.mod
@@ -46,16 +50,8 @@ jobs:
       - name: Build results-writer Lambda
         run: make build-results-writer
 
-      - name: Init
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          BUCKET="itba-tp-fraud-tfstate-${ACCOUNT_ID}"
-          aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null || \
-            aws s3api create-bucket --bucket "${BUCKET}" --region us-east-1
-          aws s3api put-bucket-versioning \
-            --bucket "${BUCKET}" \
-            --versioning-configuration Status=Enabled
-          terraform init -migrate-state -force-copy -backend-config="bucket=${BUCKET}"
+      - name: Initialize Terraform
+        run: make init
 
       - name: Apply
         run: terraform apply -auto-approve
@@ -67,7 +63,10 @@ jobs:
       - name: Write deployment summary
         run: |
           {
-            echo "## Deployment outputs"
+            echo "## Infrastructure outputs"
+            echo ""
+            echo "> **Nota:** este workflow no despliega la imagen del processor ni el dashboard estático en S3."
+            echo "> Sin \`image_uri\`, ECS puede quedar en \`:placeholder\`. Para la stack completa, usar el workflow **Deploy**."
             echo ""
             echo "| Output | Value |"
             echo "|--------|-------|"

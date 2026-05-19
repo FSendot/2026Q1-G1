@@ -17,162 +17,98 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 ---
 
-## Operaciones con GitHub Actions
+## Deploy con GitHub Actions
 
-**GitHub Actions es el camino recomendado** para desplegar, probar y destruir la infraestructura del lab. Los workflows construyen los artefactos necesarios, inicializan el backend S3 y ejecutan Terraform sin depender de herramientas locales.
+**GitHub Actions es el camino recomendado** para desplegar y destruir la infraestructura del lab. Solo **Validate** corre automáticamente en cada push/PR; **Deploy** y el resto se lanzan manualmente desde la pestaña Actions.
 
-### Requisitos previos
+### 1. Configurar secrets
 
-
-| Requisito               | Detalle                                                          |
-| ----------------------- | ---------------------------------------------------------------- |
-| Repositorio en GitHub   | Fork o clone de este proyecto                                    |
-| Lab AWS Academy         | Sesión activa; las credenciales temporales expiran cada ~4 h     |
-| Secrets del repositorio | Ver tabla siguiente                                              |
-| Rama `main`             | Requerida para que **Docker** ejecute el deploy completo en push |
+En **Settings → Secrets and variables → Actions**:
 
 
-**Secrets del repositorio** (Settings → Secrets and variables → Actions):
-
-**Mínimo para cualquier workflow que toque AWS** (Plan, Docker en `main`, Apply, Send test transactions, Destroy):
-
-
-| Secret                  | ¿Obligatorio? |
-| ----------------------- | ------------- |
-| `AWS_ACCESS_KEY_ID`     | Sí            |
-| `AWS_SECRET_ACCESS_KEY` | Sí            |
-| `AWS_SESSION_TOKEN`     | Sí            |
-
-
-Los tres forman un set indivisible: credenciales temporales del lab AWS Academy. Sin ellos, esos workflows fallan al autenticarse contra AWS.
-
-**Secrets opcionales** (el workflow corre igual si no existen):
+| Secret                       | Obligatorio | Para qué                                              |
+| ---------------------------- | ----------- | ----------------------------------------------------- |
+| `AWS_ACCESS_KEY_ID`          | Sí          | Credenciales temporales del lab AWS Academy           |
+| `AWS_SECRET_ACCESS_KEY`      | Sí          | (mismo set; expiran ~cada 4 h)                        |
+| `AWS_SESSION_TOKEN`          | Sí          |                                                       |
+| `BOOTSTRAP_EMAIL`            | Recomendado | Primer admin del dashboard en RDS                     |
+| `BOOTSTRAP_PASSWORD`         | Opcional    | Login directo en Cognito (requiere `BOOTSTRAP_EMAIL`) |
+| `BOOTSTRAP_ALERT_EMAIL`      | Opcional    | Email suscrito al SNS de resúmenes de fraude          |
+| `GOOGLE_OAUTH_CLIENT_ID`     | Opcional    | Login con Google (requiere también el secret)         |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Opcional    | Par con `GOOGLE_OAUTH_CLIENT_ID`                      |
 
 
-| Secret                       | Qué ingresar                                                                                                 | Función                                                                                                                                                                                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BOOTSTRAP_EMAIL`            | Tu email real de acceso al dashboard, p. ej. `nombre.apellido@itba.edu.ar`                                   | Crea el **primer admin del dashboard** en RDS. Sin este secret el deploy termina bien, pero nadie puede administrar invitaciones hasta correr bootstrap a mano.                                                                             |
-| `BOOTSTRAP_PASSWORD`         | Una contraseña permanente para Cognito que cumpla la política del User Pool, p. ej. `UnaPasswordDemo123!`    | Solo tiene efecto si también existe `BOOTSTRAP_EMAIL`. Crea o actualiza el usuario Cognito con ese email, marca el correo como verificado y fija la contraseña.                                                                             |
-| `BOOTSTRAP_ALERT_EMAIL`      | Otro email válido, p. ej. `alertas@example.com`                                                              | Solo tiene efecto si también existe `BOOTSTRAP_EMAIL`. Durante el bootstrap, suscribe ese email al **topic SNS de resúmenes de fraude** para recibir los emails agregados de transacciones fraudulentas.                                    |
-| `GOOGLE_OAUTH_CLIENT_ID`     | Client ID de una OAuth 2.0 Client en Google Cloud Console, p. ej. `123456789-abc.apps.googleusercontent.com` | Solo tiene efecto en **Docker** / **Apply** si **ambos** secrets Google están definidos. Terraform configura Cognito con Google como identity provider; en el login del dashboard aparece **“Sign in with Google”** además del login local. |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | Client secret asociado al mismo OAuth client de Google                                                       | Par obligatorio con `GOOGLE_OAUTH_CLIENT_ID`. Sin los dos, Cognito queda solo con login por email/contraseña. En Google Cloud hay que registrar el redirect URI de Cognito (ver sección [Dashboard Auth](#dashboard-auth)).                 |
+Los workflows **no leen `terraform.tfvars`**. Los defaults del lab están en la composición raíz y en `[terraform.tfvars.example](terraform.tfvars.example)`.
+
+Cuando el lab expira, actualizar los tres secrets AWS antes de relanzar cualquier workflow.
+
+### 2. Desplegar
+
+1. Integrar el código en `main` (push/PR solo dispara **Validate**; no crea recursos en AWS).
+2. (Opcional) **Actions → Plan** → Run workflow → escribir `plan` → revisar el artefacto `plan_output.txt`.
+3. **Actions → Deploy** → Run workflow → rama `main` → escribir `deploy`.
+4. Esperar el run verde.
+5. Abrir el **job summary** del run (*Deployment outputs*): ahí están `dashboard_url`, `api_endpoint`, `queue_url` y el resto de lo necesario para acceder al dashboard y a la API.
+
+Un push o merge a `main` **no** despliega nada; hay que lanzar **Deploy** a mano.
+
+**Deploy** ejecuta: build de imagen del processor → `terraform apply` → sync del dashboard a S3 → bootstrap automático si existe `BOOTSTRAP_EMAIL`.
+
+Para cambios solo de infra sin rebuild de apps, existe **Terraform Apply** (confirmación `apply`). No usarlo en el primer deploy ni después de un **Deploy** exitoso (puede dejar ECS en `:placeholder`).
+
+### 3. Bootstrap (si no configuraste secrets de admin)
+
+Si **no** definiste `BOOTSTRAP_EMAIL` (y opcionalmente `BOOTSTRAP_PASSWORD`), el deploy termina bien pero nadie puede administrar el dashboard hasta crear el primer admin:
+
+```bash
+make init   # credenciales AWS del lab en el entorno
+make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com
+```
+
+Con contraseña fija en Cognito:
+
+```bash
+make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com BOOTSTRAP_PASSWORD='UnaPasswordDemo123!'
+```
+
+Sin `BOOTSTRAP_PASSWORD`, el script solo crea el acceso admin en RDS; el usuario debe registrarse en Cognito Hosted UI con el mismo email.
+
+### 4. Destruir al terminar el lab
+
+**Actions → Destroy** → Run workflow → escribir `destroy`.
+
+El bucket de state S3 `itba-tp-fraud-tfstate-<account-id>` no se elimina con Destroy.
+
+---
+
+## Probar el flujo completo
 
 
-**Combinaciones habituales:**
+| Paso                             | Cómo                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1. Enviar transacciones          | **Actions → Send test transactions** (requiere infra desplegada y `enable_onprem_sim = true`)       |
+| 2. Ver el dashboard              | Abrir `dashboard_url` del job summary de **Deploy**                                                 |
+| 3. Iniciar sesión                | Cognito Hosted UI; si no usaste `BOOTSTRAP_PASSWORD`, completar registro con el email del bootstrap |
+| 4. (Opcional) Logs del processor | Local: `make logs` (AWS CLI con credenciales del lab)                                               |
 
 
-| Objetivo                                      | Secrets a configurar                                                                                 |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Deploy mínimo                                 | Solo los 3 AWS                                                                                       |
-| Primer login al dashboard sin pasos manuales  | 3 AWS + `BOOTSTRAP_EMAIL` + `BOOTSTRAP_PASSWORD`                                                     |
-| Admin en un email y alertas de fraude en otro | 3 AWS + `BOOTSTRAP_EMAIL` + `BOOTSTRAP_ALERT_EMAIL` (+ `BOOTSTRAP_PASSWORD` si querés login directo) |
-| Login con Google                              | 3 AWS + `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` (+ bootstrap si aplica)              |
+**Send test transactions** — inputs habituales: `count` (default `50000`), `fraud_pct` (`20`), `concurrency` (`128`). El generador corre en el EC2 on-prem vía SSM; el tráfico llega a SQS por VPN.
 
+Equivalente local (mismas credenciales AWS que el lab):
 
-**Secrets obligatorios por workflow:**
+```bash
+python3 -m pip install boto3
+make init
+make send-test-tx
+```
 
+Parámetros opcionales:
 
-| Workflow                                            | Secrets obligatorios                                              | Secrets opcionales              | Sin secrets                    |
-| --------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------- | ------------------------------ |
-| **Validate**                                        | —                                                                 | —                               | Sí (no usa AWS ni bootstrap)   |
-| **Plan**                                            | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | —                               | No                             |
-| **Docker** (PR / rama ≠ `main`)                     | —                                                                 | —                               | Sí (solo valida builds Docker) |
-| **Docker** (`main` o `workflow_dispatch` en `main`) | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
-| **Apply**                                           | Los 3 AWS                                                         | `BOOTSTRAP_*`, `GOOGLE_OAUTH_*` | No                             |
-| **Send test transactions**                          | Los 3 AWS                                                         | —                               | No                             |
-| **Destroy**                                         | Los 3 AWS                                                         | —                               | No                             |
+```bash
+make send-test-tx TX_COUNT=10000 FRAUD_PCT=30 TX_CONCURRENCY=256
+```
 
-
-**Recomendado para el primer deploy:** los 3 AWS + `BOOTSTRAP_EMAIL`. Sin `BOOTSTRAP_EMAIL` el deploy termina bien, pero hay que crear el admin del dashboard a mano con `make bootstrap-auth` en local.
-
-Los workflows **no leen `terraform.tfvars`**. Los defaults del lab están en la composición raíz y en `[terraform.tfvars.example](terraform.tfvars.example)`. Para ajustar variables solo en local, ver [Desarrollo local (opcional)](#desarrollo-local-opcional).
-
-**Renovar credenciales:** cuando el lab expira, actualizar los tres secrets AWS antes de relanzar cualquier workflow que toque la cuenta.
-
-### Catálogo de workflows
-
-Ejecutar manualmente: pestaña **Actions** → elegir workflow → **Run workflow**.
-
-
-| Workflow                   | Trigger                                               | Cuándo usarlo                                   | Requisitos previos                                             |
-| -------------------------- | ----------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------- |
-| **Validate**               | Push y PR a cualquier rama                            | CI en cada cambio                               | Ninguno (sin AWS)                                              |
-| **Plan**                   | Push/PR a `main`                                      | Revisar diff antes de merge                     | Secrets AWS; crea el bucket de state en el primer run          |
-| **Docker**                 | Push a `main` (paths filtrados) o `workflow_dispatch` | Deploy completo (camino CD principal)           | Secrets AWS; en `main`: apply + dashboard + bootstrap opcional |
-| **Apply**                  | `workflow_dispatch`                                   | Apply Terraform sin rebuild de imagen/dashboard | Secrets AWS; escribir `apply` en el input de confirmación      |
-| **Send test transactions** | `workflow_dispatch`                                   | Carga de prueba post-deploy                     | Secrets AWS + infra levantada + `enable_onprem_sim = true`     |
-| **Destroy**                | `workflow_dispatch`                                   | Fin de sesión del lab                           | Secrets AWS; escribir `destroy` en el input de confirmación    |
-
-
-**Paths que disparan Docker en push a `main`:** `app/processor/`**, `app/dashboard/**`, `app/results_writer/**`, `app/net/serving/go/**`, `modules/**`, `scripts/**`, `templates/**`, `main.tf`, `variables.tf`, `outputs.tf`, `.github/workflows/docker.yml`.
-
-En PRs contra `main`, **Docker** solo valida builds (processor + dashboard export) sin tocar AWS.
-
-#### Docker en `main` (deploy principal)
-
-Secuencia real del workflow `[.github/workflows/docker.yml](.github/workflows/docker.yml)`:
-
-1. `make prepare-model`
-2. Build/push de imagen del processor a ECR (reutiliza por hash de fuentes si ya existe)
-3. `make init` → `terraform plan/apply` con `image_uri`
-4. Build del dashboard con build-args de Cognito/API → `aws s3 sync` a S3
-5. `make bootstrap-auth` si `BOOTSTRAP_EMAIL` está configurado
-
-#### Apply (alternativa manual)
-
-Usar **Apply** cuando los cambios no entran en los path filters de Docker (por ejemplo, solo HCL fuera de esas rutas) o cuando se necesita un `terraform apply` sin reconstruir imagen ni dashboard. Escribir `apply` en el campo de confirmación.
-
-### Primer deploy (checklist)
-
-1. Configurar secrets en GitHub (mínimo: los tres AWS; recomendado: `BOOTSTRAP_EMAIL`).
-2. Push/merge a `main` **o** ejecutar **Docker** / **Apply** con `workflow_dispatch`.
-3. Esperar run verde; abrir el **job summary** del run (tabla *Deployment outputs* con `dashboard_url`, `api_endpoint`, `queue_url`).
-4. Ejecutar **Send test transactions** (`workflow_dispatch`, defaults abajo).
-5. Abrir `dashboard_url` del summary; completar registro Cognito si no se definió `BOOTSTRAP_PASSWORD`.
-
-### Probar el flujo completo
-
-
-| Paso                   | Camino principal (Actions)                      | Después del run                                                                                                                       |
-| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Enviar transacciones   | **Send test transactions**                      | Inputs: `count` (default `50000`), `fraud_pct` (`20`), `concurrency` (`128`), `region`, `stack`; opcional `queue_url` / `instance_id` |
-| Ver logs del processor | Sin workflow                                    | Opcional local: `make logs` (AWS CLI + credenciales; ver [Desarrollo local](#desarrollo-local-opcional))                              |
-| Abrir dashboard        | URL en el job summary de **Docker** / **Apply** | Login Cognito Hosted UI                                                                                                               |
-
-
-**Send test transactions** obtiene el instance ID del EC2 on-prem desde CloudFormation y la queue URL desde `terraform output` (salvo overrides). El generador Go corre en el EC2 vía SSM (`AWS-RunShellScript`); el tráfico SQS viaja por VPN al Interface VPC Endpoint. En el EC2, el generador firma requests con SigV4 y envía batches de hasta 10 mensajes; `concurrency` controla workers simultáneos.
-
-El processor en Fargate expone `processor_pollers` (long-pollers SQS por task) y `processor_concurrency` (workers paralelos). Para pruebas de límite, subir `processor_concurrency`, `processor_pollers`, `max_capacity` y `concurrency` del workflow en conjunto. El worker serializa por `user_id` dentro de cada task; la cola es Standard SQS (sin orden global entre tasks).
-
-Patrones de transacción generados:
-
-- **Normal:** usuarios recurrentes/nuevos, importes bajos/medios, beneficiarios conocidos, dispositivo estable, gaps de horas o días.
-- **Fraude:** account drain, country shift, device/identity shift, merchant fanout, card testing, gaps de segundos/minutos.
-
-### Outputs tras un deploy
-
-Los workflows **Docker** (solo `main`) y **Apply** escriben una tabla en el job summary:
-
-
-| Output              | Uso                                               |
-| ------------------- | ------------------------------------------------- |
-| `dashboard_url`     | Entrada recomendada al dashboard (Cognito + PKCE) |
-| `dashboard_app_url` | Mismo objeto HTTPS que `dashboard_url`            |
-| `api_endpoint`      | Base URL de la API REST                           |
-| `queue_url`         | Cola SQS de ingesta (on-prem → aquí)              |
-
-
-Outputs adicionales disponibles solo vía CLI local: ver [Verificar outputs](#6-verificar-outputs).
-
-### Tear down
-
-Al finalizar la sesión del lab:
-
-1. Actions → **Destroy** → Run workflow.
-2. Escribir `destroy` en el input de confirmación.
-3. Esperar run verde.
-
-El bucket de state S3 `itba-tp-fraud-tfstate-<account-id>` **no** se elimina (vive fuera del state de Terraform). Para borrarlo manualmente, ver [Desarrollo local (opcional)](#desarrollo-local-opcional).
+Patrones generados: transacciones **normales** (usuarios recurrentes, montos bajos/medios) y **fraude** (account drain, country shift, card testing, etc.).
 
 ---
 
@@ -292,7 +228,7 @@ Sitio web estático en S3 con el panel de operaciones. Muestra las últimas tran
 
 **Recursos:** `[aws_s3_bucket.dashboard](modules/dashboard/main.tf#L9)`, `[aws_s3_bucket_website_configuration.dashboard](modules/dashboard/main.tf#L23)`, `[aws_s3_bucket_policy.dashboard](modules/dashboard/main.tf#L41)`, objetos estáticos: `[aws_s3_object.index_html](modules/dashboard/main.tf#L58)`, `[aws_s3_object.app_js](modules/dashboard/main.tf#L72)`, `[aws_s3_object.config_js](modules/dashboard/main.tf#L86)` (`templatefile()` con la URL de API Gateway).
 
-Los archivos `index.html` y `app.js` son subidos por el pipeline CI/CD mediante `aws s3 sync` después de cada build.
+Terraform crea el bucket y objetos iniciales; el contenido actualizado del frontend se publica con `aws s3 sync` al final del workflow **Deploy** (manual).
 
 ### `modules/auth`
 
@@ -342,195 +278,19 @@ La autorización final no vive sólo en Cognito: la Lambda API mantiene una tabl
 
 ---
 
-## Desarrollo local (opcional)
+## Dashboard y autenticación
 
-Usar la consola local solo cuando haga falta: tail de logs en vivo, depuración offline, o ajustes en `terraform.tfvars`. Para deploy, pruebas de carga y teardown, preferir [Operaciones con GitHub Actions](#operaciones-con-github-actions).
+Tras un **Deploy** exitoso, usar `dashboard_url` del **job summary** (no el endpoint HTTP de S3 website: PKCE requiere HTTPS).
 
-### Prerrequisitos (solo local)
+- **Transaction User**: `user_id` de las transacciones financieras.
+- **Dashboard User**: persona autenticada en Cognito.
 
-- Terraform ≥ 1.9
-- AWS CLI con credenciales del lab (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`)
-- Python 3 + pip (capa Lambda psycopg2, `send-test-tx`, `bootstrap-auth`)
-- Go (build de `results-writer`)
-- `make`
-- Docker (solo si se construye processor/dashboard fuera de CI)
+Cognito autentica; RDS autoriza vía `dashboard_access`. El bootstrap admin invita emails desde la pestaña **Invitaciones**; el invitado se registra en Cognito con el mismo email.
 
-### Configuración de variables
-
-```bash
-cp terraform.tfvars.example terraform.tfvars
-```
-
-Ajustar valores según el entorno. No commitear `terraform.tfvars` (ver `[docs/SECURITY.md](docs/SECURITY.md)`).
-
-### Cadena de dependencias
-
-```
-terraform.tfvars  →  make build-layers + make build-results-writer  →  make init  →  make plan  →  make apply
-```
-
-`make plan` y `make validate` ejecutan los builds automáticamente. Si se invoca `terraform plan` / `apply` / `validate` directamente, los artefactos deben existir antes porque Terraform calcula sus hashes en el plan.
-
-### Comandos locales
-
-
-| Objetivo             | Comando               | Depende de                      |
-| -------------------- | --------------------- | ------------------------------- |
-| Init                 | `make init`           | Credenciales AWS activas        |
-| Plan                 | `make plan`           | init + builds                   |
-| Apply                | `make apply`          | `tfplan` revisado               |
-| Destroy              | `make destroy`        | init                            |
-| Enviar transacciones | `make send-test-tx`   | init, `boto3`, infra desplegada |
-| Logs Fargate         | `make logs`           | Credenciales AWS                |
-| Bootstrap admin      | `make bootstrap-auth` | init, deploy completado         |
-
-
-### Guía de ejecución paso a paso
-
-#### 1. Generar builds necesarios
-
-```bash
-make build-layers
-make build-results-writer
-```
-
-#### 2. Inicializar Terraform
-
-```bash
-make init
-```
-
-#### 3. Planear
-
-```bash
-make plan
-```
-
-#### 4. Aplicar
-
-```bash
-make apply
-```
-
-#### 5. Bootstrap admin (si no corrió en CI)
-
-```bash
-make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com
-```
-
-#### 6. Verificar outputs
-
-```bash
-terraform output
-```
-
-
-| Output                  | Descripción                                                  |
-| ----------------------- | ------------------------------------------------------------ |
-| `dashboard_url`         | URL HTTPS recomendada para abrir el dashboard con Cognito    |
-| `dashboard_website_url` | Endpoint HTTP de S3 website; no usar como entrada de Cognito |
-| `api_endpoint`          | URL base de la API REST                                      |
-| `queue_url`             | URL de la cola SQS de ingesta (on-prem envía aquí)           |
-| `sns_topic_arn`         | ARN del topic SNS de resúmenes de fraude                     |
-| `fraud_alert_queue_url` | URL de la cola SQS que alimenta los resúmenes de fraude      |
-| `vpn_gateway_public_ip` | IP pública del router on-prem (strongSwan)                   |
-| `db_password`           | Contraseña RDS generada (sensible, usar `-raw`)              |
-
-
-### Probar el flujo desde la consola
-
-Equivalente local a los workflows de Actions:
-
-```bash
-python3 -m pip install boto3
-make init
-make send-test-tx
-```
-
-Parámetros opcionales:
-
-```bash
-make send-test-tx TX_COUNT=10000 FRAUD_PCT=30 TX_CONCURRENCY=256
-```
-
-```bash
-make logs
-terraform output -raw dashboard_url
-```
-
-### Tear down local
-
-```bash
-make destroy
-```
-
-Eliminar el bucket de state manualmente (opcional):
-
-```bash
-aws s3 rb "s3://itba-tp-fraud-tfstate-$(aws sts get-caller-identity --query Account --output text)" --force
-```
-
----
-
-## Dashboard
-
-El dashboard es un sitio web estático en S3 que consulta la API REST en tiempo real. Tras un deploy exitoso (**Docker** o **Apply**), la URL aparece en el job summary como `dashboard_url`. También se puede obtener localmente:
-
-```bash
-terraform output -raw dashboard_url
-```
-
-La URL anterior es el objeto HTTPS `index.html` y es la entrada correcta para Cognito Hosted UI. El endpoint HTTP de S3 website existe como salida separada, pero no sirve como entrada de login porque PKCE necesita un contexto seguro del navegador.
-
-```bash
-terraform output -raw dashboard_website_url
-```
-
-Si necesitás la salida histórica usada por el build, `dashboard_app_url` apunta al mismo objeto HTTPS que `dashboard_url`.
-
-### Dashboard Auth
-
-El dashboard distingue entre:
-
-- **Transaction User**: `user_id` interno de las transacciones financieras.
-- **Dashboard User**: persona autenticada en Cognito que quiere ver el dashboard.
-
-Cognito autentica. RDS autoriza. La tabla `dashboard_access` permite que el bootstrap admin invite emails antes de que el usuario se registre. Cuando el usuario entra con Cognito y su email está verificado, `/dashboard/me` activa la invitación pendiente y recién ahí el dashboard carga datos financieros.
-
-**Bootstrap automático (recomendado):** si `BOOTSTRAP_EMAIL` está configurado como secret, los workflows **Docker** (`main`) y **Apply** ejecutan `make bootstrap-auth` al final del deploy. Con `BOOTSTRAP_PASSWORD` opcional, también crean o resetean el usuario Cognito.
-
-**Bootstrap manual (opcional):**
-
-```bash
-make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com
-```
-
-Con contraseña permanente en Cognito:
-
-```bash
-make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com BOOTSTRAP_PASSWORD='UnaPasswordDemo123'
-```
-
-`BOOTSTRAP_PASSWORD` es opcional. Si no se pasa, el script sólo crea el acceso admin en RDS y el admin debe registrarse por Cognito Hosted UI con el mismo email. El script es idempotente y falla si ya existe otro bootstrap admin distinto.
-
-Las invitaciones no envían emails. El bootstrap admin crea el invite desde la pestaña **Invitaciones**; el invitado entra por la URL del dashboard, se registra con el mismo email en Cognito, verifica el correo y queda habilitado como usuario read-only. Los usuarios read-only ven datos del dashboard pero no ven ni pueden usar la pestaña de invitaciones; eso es esperado, no un bug.
-
-Para Google OAuth, configurar en Google Cloud el redirect URI de Cognito:
+Para Google OAuth, registrar en Google Cloud el redirect URI:
 
 ```text
 https://itba-fraud-auth-<account-id>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
-```
-
-El dashboard incluye un modal de cuenta para cambiar contraseña en usuarios Cognito locales. Usuarios federados por Google no ven esa opción porque su contraseña se administra en Google.
-
-**Endpoints de la API** (requieren un id-token de Cognito obtenido vía browser; no hay workflow para esto):
-
-```bash
-API=$(terraform output -raw api_endpoint)
-
-curl -H "Authorization: Bearer <id-token>" "$API/health"
-curl -H "Authorization: Bearer <id-token>" "$API/stats"
-curl -H "Authorization: Bearer <id-token>" "$API/transactions?limit=10"
 ```
 
 ---
@@ -546,7 +306,7 @@ curl -H "Authorization: Bearer <id-token>" "$API/transactions?limit=10"
 ├── backend.tf               # Backend S3 (partial config, bucket se pasa en init)
 ├── terraform.tfvars.example # Plantilla de configuración
 ├── Makefile                 # Targets: init, plan, apply, destroy, build-layers, seed, send-test-tx, logs
-├── .github/workflows/       # Validate, Plan, Docker, Apply, Destroy, Send test transactions
+├── .github/workflows/       # Validate, Plan, Deploy, Terraform Apply, Destroy, Send test transactions
 ├── modules/
 │   ├── network/             # VPC, subnets, VPN Gateway, VPC Endpoints
 │   ├── queue/               # SQS ingesta + DLQ + CIDR lock on-prem
