@@ -32,3 +32,13 @@ output "cloudformation_stack_id" {
   description = "ID del stack de CloudFormation que despliega el VPN gateway strongSwan."
   value       = aws_cloudformation_stack.strongswan.id
 }
+
+output "traffic_producer_instance_ids" {
+  description = "Mapa de IDs de instancia EC2 para los productores de tráfico on-premise simulado (vacío si enable_traffic_producers = false)."
+  value       = { for key, instance in aws_instance.producer : key => instance.id }
+}
+
+output "traffic_producer_private_ips" {
+  description = "Mapa de IPs privadas de los productores de tráfico on-premise simulado (vacío si enable_traffic_producers = false)."
+  value       = { for key, instance in aws_instance.producer : key => instance.private_ip }
+}

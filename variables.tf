@@ -109,6 +109,12 @@ variable "enable_onprem_sim" {
   default     = true
 }
 
+variable "enable_onprem_traffic_producers" {
+  description = "Crea dos instancias EC2 en la VPC on-premise simulada que envían transacciones sintéticas de forma continua a la cola SQS de ingesta. Requiere enable_onprem_sim = true."
+  type        = bool
+  default     = true
+}
+
 variable "fraud_alert_summary_interval_minutes" {
   description = "Intervalo, en minutos, para ejecutar el resumen programado de alertas de fraude."
   type        = number

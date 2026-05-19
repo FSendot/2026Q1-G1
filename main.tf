@@ -290,5 +290,7 @@ module "onprem_sim" {
   onprem_vpc_cidr                        = local.onprem_vpc_cidr
   sqs_vpce_eni_count                     = length(local.azs)
   sqs_vpc_endpoint_network_interface_ids = module.network.sqs_vpc_endpoint_network_interface_ids
+  enable_traffic_producers               = var.enable_onprem_traffic_producers
+  ingestion_queue_url                    = module.queue.queue_url
   tags                                   = local.common_tags
 }

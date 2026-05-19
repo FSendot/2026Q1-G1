@@ -7,7 +7,7 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 **Flujo de datos:**
 
-1. Un productor on-prem envía una transacción JSON al SQS de ingesta a través del túnel VPN, este JSON contiene información de la transacción y el usuario.
+1. Dos instancias EC2 on-prem (`producer-1`, `producer-2`) envían transacciones JSON al SQS de ingesta de forma continua (~2.000 tx/min cada una) a través del túnel VPN; opcionalmente podés lanzar picos manuales con `scripts/send_test_transactions.py`.
 2. Fargate consume el mensaje, consulta el perfil del usuario en DynamoDB y calcula el fraud score
 3. El resultado se envía directo al SQS de resultados; si es fraude, también se encola en el SQS de alertas
 4. La Lambda `results-writer` toma el mensaje de resultados de SQS y persiste el resultado en RDS vía RDS Proxy
@@ -213,11 +213,12 @@ Simula un sitio corporativo on-premise conectado a AWS mediante una VPN Site-to-
 **Recursos:**
 
 - VPC pública `192.168.0.0/16`: `[aws_vpc.onprem](modules/onprem_sim/main.tf#L18)`, subnets/IGW/rutas en el mismo archivo; EC2 strongSwan vía `[aws_cloudformation_stack.strongswan](modules/onprem_sim/main.tf#L225)` y plantilla `[templates/vpn-gateway-strongswan.yml](templates/vpn-gateway-strongswan.yml)`
+- Productores de tráfico: `[aws_instance.producer](modules/onprem_sim/producers.tf)` (`for_each` → `producer-1`, `producer-2`) con servicio `systemd` `onprem-tx-producer` que envía transacciones sintéticas continuas a la cola de ingesta (~200 msgs / 6 s por instancia)
 - VPN: `[aws_customer_gateway.cgw](modules/onprem_sim/main.tf#L158)`, `[aws_vpn_connection.vpn](modules/onprem_sim/main.tf#L168)` (2 túneles BGP contra el VGW)
 - PSKs: `[aws_secretsmanager_secret` / `secret_version` túnel 1 y 2](modules/onprem_sim/main.tf#L184)
 - Route 53 Private Hosted Zone: `[aws_route53_zone.sqs_private](modules/onprem_sim/main.tf#L296)`, `[aws_route53_record.sqs_apex](modules/onprem_sim/main.tf#L314)` — resuelve `sqs.<region>.amazonaws.com` a las IPs privadas del VPC Endpoint
 
-Controlado por `[var.enable_onprem_sim](variables.tf#L62)` (default: `true`). Ponerlo en `false` destruye la simulación on-prem y elimina el CIDR lock de la cola de ingesta.
+Controlado por `[var.enable_onprem_sim](variables.tf#L106)` (default: `true`) y `[var.enable_onprem_traffic_producers](variables.tf#L112)` (default: `true`). Poner `enable_onprem_sim = false` destruye la simulación on-prem; `enable_onprem_traffic_producers = false` elimina solo los EC2 productores.
 
 ---
 
