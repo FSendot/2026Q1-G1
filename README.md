@@ -48,7 +48,9 @@ Cuando el lab expira, actualizar los tres secrets AWS antes de relanzar cualquie
 2. (Opcional) **Actions → Plan** → Run workflow → escribir `plan` → revisar el artefacto `plan_output.txt`.
 3. **Actions → Deploy** → Run workflow → rama `main` → escribir `deploy`.
 4. Esperar el run verde.
-5. Abrir el **job summary** del run (*Deployment outputs*): ahí están `dashboard_url`, `api_endpoint`, `queue_url` y el resto de lo necesario para acceder al dashboard y a la API.
+5. Abrir esa URL en el navegador:
+   - En el **job summary** del run de **Deploy** (*Deployment outputs* → `dashboard_url`), o
+   - **Actions → Dashboard URL** → Run workflow → en el job summary aparece solo la URL (también en el log del paso *Print dashboard URL*).
 
 Un push o merge a `main` **no** despliega nada; hay que lanzar **Deploy** a mano.
 
@@ -306,7 +308,7 @@ https://itba-fraud-auth-<account-id>.auth.us-east-1.amazoncognito.com/oauth2/idp
 ├── backend.tf               # Backend S3 (partial config, bucket se pasa en init)
 ├── terraform.tfvars.example # Plantilla de configuración
 ├── Makefile                 # Targets: init, plan, apply, destroy, build-layers, seed, send-test-tx, logs
-├── .github/workflows/       # Validate, Plan, Deploy, Terraform Apply, Destroy, Send test transactions
+├── .github/workflows/       # Validate, Plan, Deploy, Dashboard URL, Terraform Apply, Destroy, Send test transactions
 ├── modules/
 │   ├── network/             # VPC, subnets, VPN Gateway, VPC Endpoints
 │   ├── queue/               # SQS ingesta + DLQ + CIDR lock on-prem
