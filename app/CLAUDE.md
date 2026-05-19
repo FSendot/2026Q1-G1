@@ -8,57 +8,40 @@ This is an MVP to demo to VISA on Wednesday. Keep it simple and working over per
 
 ---
 
-## Architecture
+## Architecture (deployed)
 
 ```
-TransactionEvent (protobuf via gRPC)
+Producer (on-prem sim) → SQS ingestion
         ↓
-   Load Balancer
+   ECS Fargate worker (cmd/worker) ←→ DynamoDB user_behavior
         ↓
-   [PROCESSOR]  ←→  DynamoDB (user profile read/write)
+   SQS results (+ SQS fraud alerts if fraud)
         ↓
-   RabbitMQ (publishes enriched event)
+   Lambda results-writer → RDS PostgreSQL (via RDS Proxy)
         ↓
-   Batch Consumer
-        ↓
-   Redshift (analytics + dashboard)
-        ↓
-   API REST → Dashboard (VISA)
+   HTTP API (Lambda) → Dashboard (S3 static site)
 
-S3 ← backup (Dynamo + Redshift automated)
-Neptune ← post-MVP (money laundering / graph fraud)
+S3 audit bucket ← optional raw JSON per transaction from worker
 ```
 
 ---
 
-## Transaction Event (proto)
+## Transaction payload (SQS JSON)
 
-```proto
-message TransactionEvent {
-  string transaction_id = 1;
-  string user_id        = 2;
-  string person_id      = 3;
-  string account_id     = 4;
-  double amount         = 5;
-  string currency       = 6;
-  string timestamp      = 7;
-  string channel        = 8;
-  string destination_account = 9;
-  string country        = 10;
-}
-```
+Workers consume JSON with at least `transaction_id`, `user_id`, `amount`, `currency`,
+`timestamp`, `channel`, `destination_account`, `country`, and optional ML `features`.
 
 ---
 
 ## Processor flow (in order)
 
-1. Receive TransactionEvent via gRPC
-2. Generate correlation_id for tracing
-3. GET user profile from DynamoDB (single item, low latency)
-4. Compute fraud features and score
-5. Decide: allow / block / challenge
-6. Publish enriched event to RabbitMQ
-7. UPDATE user profile in DynamoDB (incremental, no full history)
+1. Receive JSON message from ingestion SQS
+2. GET user profile from DynamoDB
+3. Compute fraud features and score (ML runtime or rule fallback)
+4. Publish `ScoringResult` JSON to results SQS (and fraud-alert SQS when fraudulent)
+5. Optionally PUT audit JSON to S3
+6. UPDATE user profile in DynamoDB
+7. Delete ingestion message on success
 
 ---
 

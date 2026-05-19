@@ -2,7 +2,6 @@ package scoring
 
 import (
 	"github.com/FSendot/fraud-detector/processor/internal/dynamo"
-	pb "github.com/FSendot/fraud-detector/processor/proto"
 )
 
 // Weights for each fraud flag.
@@ -23,8 +22,8 @@ type RulesResult struct {
 	FlagDestination bool
 }
 
-// EvaluateDirect runs fraud rules from primitive values instead of a proto request.
-// Used by the SQS worker which receives JSON messages, not gRPC calls.
+// EvaluateDirect runs fraud rules from primitive values.
+// Used by the SQS worker which receives JSON messages.
 func EvaluateDirect(amount float64, country, destination string, profile *dynamo.UserProfile) RulesResult {
 	var r RulesResult
 
@@ -32,42 +31,6 @@ func EvaluateDirect(amount float64, country, destination string, profile *dynamo
 	r.FlagCountry = flagCountry(country, profile.TypicalCountries)
 	r.FlagVelocity = flagVelocity(profile.TxLast10Min)
 	r.FlagDestination = flagDestination(destination, profile.KnownDestinations)
-
-	if r.FlagAmount {
-		r.Score += WeightAmount
-	}
-	if r.FlagCountry {
-		r.Score += WeightCountry
-	}
-	if r.FlagVelocity {
-		r.Score += WeightVelocity
-	}
-	if r.FlagDestination {
-		r.Score += WeightDestination
-	}
-
-	switch {
-	case r.Score >= 70:
-		r.Decision = "blocked"
-	case r.Score >= 40:
-		r.Decision = "challenged"
-	default:
-		r.Decision = "allowed"
-	}
-
-	return r
-}
-
-// Evaluate runs all fraud rules against the transaction and user profile.
-func Evaluate(tx *pb.ProcessTransactionRequest, profile *dynamo.UserProfile) RulesResult {
-	var r RulesResult
-	transaction := tx.GetTransaction()
-	amount := tx.GetFeatures()["amount"]
-
-	r.FlagAmount = flagAmount(amount, profile.AvgAmount, profile.StdDevAmount)
-	r.FlagCountry = flagCountry(transaction.GetCountry(), profile.TypicalCountries)
-	r.FlagVelocity = flagVelocity(profile.TxLast10Min)
-	r.FlagDestination = flagDestination(transaction.GetDestinationAccount(), profile.KnownDestinations)
 
 	if r.FlagAmount {
 		r.Score += WeightAmount
