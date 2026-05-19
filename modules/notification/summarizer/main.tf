@@ -49,7 +49,7 @@ resource "aws_vpc_security_group_egress_rule" "summarizer_to_endpoints" {
 data "archive_file" "summarizer" {
   type        = "zip"
   output_path = "${path.module}/handler.zip"
-  source_file = "${path.module}/handler.py"
+  source_file = var.source_file
 }
 
 resource "aws_lambda_function" "summarizer" {

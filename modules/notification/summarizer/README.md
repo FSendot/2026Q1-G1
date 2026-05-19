@@ -1,6 +1,6 @@
 # `modules/notification/summarizer`
 
-Owns the scheduled Lambda that drains fraudulent scoring results from SQS, builds one plain-text operational summary, publishes it to SNS, and deletes processed messages only after the publish succeeds.
+Owns the scheduled Lambda infrastructure that runs the fraud-summary code from `app/notification/summarizer/handler.py`.
 
 ## Resources
 
@@ -11,4 +11,4 @@ Owns the scheduled Lambda that drains fraudulent scoring results from SQS, build
 
 ## Runtime
 
-The Lambda uses only the Python standard library plus `boto3` from the AWS Lambda runtime. It receives `FRAUD_ALERT_QUEUE_URL`, `SUMMARY_TOPIC_ARN`, `MAX_MESSAGES_PER_RUN`, and `SUMMARY_INTERVAL_MINUTES` as environment variables.
+The Python source is passed through `var.source_file` and packaged by `archive_file`. This submodule should stay infrastructure-only. The Lambda receives `FRAUD_ALERT_QUEUE_URL`, `SUMMARY_TOPIC_ARN`, `MAX_MESSAGES_PER_RUN`, and `SUMMARY_INTERVAL_MINUTES` as environment variables.

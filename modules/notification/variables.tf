@@ -44,6 +44,11 @@ variable "endpoint_security_group_id" {
   type        = string
 }
 
+variable "summarizer_source_file" {
+  description = "Ruta absoluta o relativa al root module del handler Python de la Lambda summarizer. El código vive bajo app/; el módulo sólo lo empaqueta."
+  type        = string
+}
+
 variable "summary_interval_minutes" {
   description = "Intervalo, en minutos, con el que se envía un resumen SNS de transacciones fraudulentas."
   type        = number

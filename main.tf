@@ -129,6 +129,7 @@ module "notification" {
   vpc_id                     = module.network.vpc_id
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
+  summarizer_source_file     = "${path.module}/app/notification/summarizer/handler.py"
   summary_interval_minutes   = var.fraud_alert_summary_interval_minutes
   tags                       = local.common_tags
 }

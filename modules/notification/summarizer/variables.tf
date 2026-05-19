@@ -29,6 +29,11 @@ variable "endpoint_security_group_id" {
   type        = string
 }
 
+variable "source_file" {
+  description = "Ruta del handler Python a empaquetar en la Lambda. El código de negocio debe vivir fuera del módulo de infraestructura."
+  type        = string
+}
+
 variable "fraud_alert_queue_url" {
   description = "URL de la cola SQS de alertas de fraude."
   type        = string
