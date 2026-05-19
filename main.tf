@@ -131,6 +131,7 @@ module "notification" {
   private_subnet_ids         = module.network.private_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   summarizer_package_file    = data.archive_file.notification_summarizer.output_path
+  dashboard_url              = local.dashboard_app_url
   summary_interval_minutes   = var.fraud_alert_summary_interval_minutes
   tags                       = local.common_tags
 }

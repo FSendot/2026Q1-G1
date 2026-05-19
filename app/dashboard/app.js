@@ -1199,6 +1199,40 @@
     }
   }
 
+  function isInviteDisabled(row) {
+    return Boolean(
+      row.disabled ||
+      row.is_disabled ||
+      row.revoked ||
+      row.archived ||
+      String(row.status || "").toLowerCase() === "disabled"
+    );
+  }
+
+  function setInviteListMessage(text, kind = "") {
+    const el = $("invite-list-message");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.remove("success", "error");
+    if (kind) el.classList.add(kind);
+    el.hidden = !text;
+  }
+
+  function renderInviteActionCell(row) {
+    const id = textOrEmpty(row.id);
+    const email = textOrEmpty(row.email || row.user_email || row.invited_email);
+    if (row.is_bootstrap_admin) {
+      return '<span class="invite-action-note">Protegida</span>';
+    }
+    if (isInviteDisabled(row)) {
+      return '<span class="invite-action-note">Ya deshabilitada</span>';
+    }
+    if (!id) {
+      return '<span class="invite-action-note">—</span>';
+    }
+    return `<button type="button" class="btn-ghost btn-mini invite-disable" data-id="${esc(id)}" data-email="${esc(email)}">Deshabilitar</button>`;
+  }
+
   function renderInvitesTable(rows) {
     const tbody = $("invites-tbody");
     if (!tbody) return;
@@ -1207,21 +1241,26 @@
       return;
     }
     tbody.innerHTML = rows.map(row => {
-      const id = textOrEmpty(row.id);
       const email = textOrEmpty(row.email || row.user_email || row.invited_email);
       const displayName = textOrEmpty(row.display_name || row.name);
       const isBootstrapAdmin = Boolean(row.is_bootstrap_admin);
-      const isDisabled = Boolean(row.disabled || row.is_disabled || row.revoked || row.archived || row.status === "disabled");
-      const status = isBootstrapAdmin ? "Bootstrap admin" : isDisabled ? "Deshabilitada" : (row.status || "Activa");
-      const disabledLabel = isBootstrapAdmin ? "Protegida" : "Deshabilitar";
+      const isDisabled = isInviteDisabled(row);
+      const rawStatus = String(row.status || "").toLowerCase();
+      const status = isBootstrapAdmin
+        ? "Bootstrap admin"
+        : isDisabled
+          ? "Deshabilitada"
+          : rawStatus === "pending"
+            ? "Pendiente"
+            : rawStatus === "active"
+              ? "Activa"
+              : (row.status || "Activa");
       return `<tr>
         <td>${esc(email)}</td>
         <td>${esc(displayName || "—")}</td>
         <td>${esc(status)}</td>
         <td>${isBootstrapAdmin ? '<span class="pill challenge">Protegida</span>' : (isDisabled ? '<span class="pill block">Inactiva</span>' : '<span class="pill allow">Activa</span>')}</td>
-        <td>
-          <button class="btn-ghost btn-mini invite-disable" data-id="${esc(id)}" data-email="${esc(email)}" ${!id || isBootstrapAdmin || isDisabled ? "disabled" : ""}>${esc(disabledLabel)}</button>
-        </td>
+        <td style="text-align:right">${renderInviteActionCell(row)}</td>
       </tr>`;
     }).join("");
     tbody.querySelectorAll(".invite-disable").forEach(btn => {
@@ -1261,8 +1300,14 @@
       return;
     }
     if (!window.confirm(`Deshabilitar invitación para ${email || id}?`)) return;
+    clearErr("invites");
+    setInviteListMessage("");
     try {
       await apiFetch(`/dashboard/invites/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setInviteListMessage(
+        `La invitación de ${email || "ese usuario"} fue deshabilitada.`,
+        "success",
+      );
       await loadInvites();
     } catch (err) {
       showErr("invites", err.message || "No se pudo deshabilitar la invitación.");

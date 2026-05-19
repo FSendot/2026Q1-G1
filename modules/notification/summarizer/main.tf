@@ -69,6 +69,7 @@ resource "aws_lambda_function" "summarizer" {
     variables = {
       FRAUD_ALERT_QUEUE_URL    = var.fraud_alert_queue_url
       SUMMARY_TOPIC_ARN        = var.summary_topic_arn
+      DASHBOARD_URL            = var.dashboard_url
       MAX_MESSAGES_PER_RUN     = tostring(var.summarizer_max_messages_per_run)
       SUMMARY_INTERVAL_MINUTES = tostring(var.summary_interval_minutes)
     }

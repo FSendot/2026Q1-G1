@@ -37,9 +37,9 @@ The module is intentionally minimal — single AZ, permissive security group, no
 | `enable_traffic_producers`  | `bool`         | `true`               | Create two EC2 producers that continuously send to the ingestion SQS queue.                  |
 | `ingestion_queue_url`       | `string`       | `""`                 | SQS queue URL wired into producer user-data (required when `enable_traffic_producers = true`). |
 | `producer_instance_type`    | `string`       | `"t3a.micro"`        | EC2 type for traffic producers.                                                              |
-| `producer_batch_size`       | `number`       | `200`                | Messages sent per producer loop iteration.                                                     |
-| `producer_loop_interval_sec`| `number`       | `6`                  | Sleep between iterations (~2,000 tx/min per producer at defaults).                           |
-| `producer_fraud_pct`        | `number`       | `20`                 | Percentage of generated transactions with fraud patterns.                                    |
+| `producer_batch_size`       | `number`       | `5`                  | Messages sent per producer loop iteration.                                                     |
+| `producer_loop_interval_sec`| `number`       | `12`                 | Sleep between iterations (~25 tx/min per producer; ~50 tx/min total with two producers).     |
+| `producer_fraud_pct`        | `number`       | `8`                  | Percentage of generated transactions with fraud patterns.                                    |
 | `tags`                      | `map(string)`  | `{}`                 | Common tags merged with `Component = "onprem-sim"`.                                          |
 
 ## Outputs

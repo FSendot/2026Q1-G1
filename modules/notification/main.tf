@@ -25,6 +25,7 @@ module "summarizer" {
   package_file                    = var.summarizer_package_file
   fraud_alert_queue_url           = module.summary_queue.queue_url
   summary_topic_arn               = module.topic.topic_arn
+  dashboard_url                   = var.dashboard_url
   summary_interval_minutes        = var.summary_interval_minutes
   summarizer_max_messages_per_run = var.summarizer_max_messages_per_run
   log_retention_days              = var.log_retention_days

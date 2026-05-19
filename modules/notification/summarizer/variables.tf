@@ -49,6 +49,12 @@ variable "summary_topic_arn" {
   type        = string
 }
 
+variable "dashboard_url" {
+  description = "URL HTTPS del dashboard incluida en el correo de resumen de fraude."
+  type        = string
+  default     = ""
+}
+
 variable "summary_interval_minutes" {
   description = "Intervalo, en minutos, para publicar resúmenes."
   type        = number

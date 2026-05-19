@@ -10,7 +10,7 @@ on:
       fraud_pct:
         description: Percentage of transactions using the fraud pattern.
         required: true
-        default: "20"
+        default: "8"
       concurrency:
         description: Concurrent SQS batch sender workers on the on-prem EC2.
         required: true

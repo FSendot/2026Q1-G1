@@ -94,7 +94,9 @@ El bucket de state S3 `itba-tp-fraud-tfstate-<account-id>` no se elimina con Des
 | 4. (Opcional) Logs del processor | Local: `make logs` (AWS CLI con credenciales del lab)                                               |
 
 
-**Send test transactions** — inputs habituales: `count` (default `50000`), `fraud_pct` (`20`), `concurrency` (`128`). El generador corre en el EC2 on-prem vía SSM; el tráfico llega a SQS por VPN.
+**Send test transactions** — inputs habituales: `count` (default `50000`), `fraud_pct` (`8`), `concurrency` (`128`). El generador corre en el EC2 on-prem vía SSM; el tráfico llega a SQS por VPN.
+
+Los productores on-prem continuos envían por defecto ~**50 tx/min** (2 instancias × 5 mensajes cada 12 s) con ~**8%** de transacciones con patrón de fraude. El resumen por email corre cada `fraud_alert_summary_interval_minutes` (default 7) y procesa hasta 500 alertas por envío.
 
 Equivalente local (mismas credenciales AWS que el lab):
 
@@ -215,7 +217,7 @@ Simula un sitio corporativo on-premise conectado a AWS mediante una VPN Site-to-
 **Recursos:**
 
 - VPC pública `192.168.0.0/16`: `[aws_vpc.onprem](modules/onprem_sim/main.tf#L18)`, subnets/IGW/rutas en el mismo archivo; EC2 strongSwan vía `[aws_cloudformation_stack.strongswan](modules/onprem_sim/main.tf#L225)` y plantilla `[templates/vpn-gateway-strongswan.yml](templates/vpn-gateway-strongswan.yml)`
-- Productores de tráfico: `[aws_instance.producer](modules/onprem_sim/producers.tf)` (`for_each` → `producer-1`, `producer-2`) con servicio `systemd` `onprem-tx-producer` que envía transacciones sintéticas continuas a la cola de ingesta (~200 msgs / 6 s por instancia)
+- Productores de tráfico: `[aws_instance.producer](modules/onprem_sim/producers.tf)` (`for_each` → `producer-1`, `producer-2`) con servicio `systemd` `onprem-tx-producer` que envía transacciones sintéticas continuas a la cola de ingesta (default ~5 msgs / 12 s por instancia ≈ 50 tx/min en total)
 - VPN: `[aws_customer_gateway.cgw](modules/onprem_sim/main.tf#L158)`, `[aws_vpn_connection.vpn](modules/onprem_sim/main.tf#L168)` (2 túneles BGP contra el VGW)
 - PSKs: `[aws_secretsmanager_secret` / `secret_version` túnel 1 y 2](modules/onprem_sim/main.tf#L184)
 - Route 53 Private Hosted Zone: `[aws_route53_zone.sqs_private](modules/onprem_sim/main.tf#L296)`, `[aws_route53_record.sqs_apex](modules/onprem_sim/main.tf#L314)` — resuelve `sqs.<region>.amazonaws.com` a las IPs privadas del VPC Endpoint

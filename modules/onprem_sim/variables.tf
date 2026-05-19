@@ -129,18 +129,18 @@ variable "producer_instance_type" {
 variable "producer_batch_size" {
   description = "Cantidad de mensajes que cada productor intenta enviar por iteración del loop continuo."
   type        = number
-  default     = 200
+  default     = 5
 
   validation {
-    condition     = var.producer_batch_size >= 10 && var.producer_batch_size <= 1000
-    error_message = "producer_batch_size debe estar entre 10 y 1000."
+    condition     = var.producer_batch_size >= 1 && var.producer_batch_size <= 1000
+    error_message = "producer_batch_size debe estar entre 1 y 1000."
   }
 }
 
 variable "producer_loop_interval_sec" {
-  description = "Segundos de espera entre iteraciones de envío continuo por productor (~200 mensajes cada 6 s ≈ 2000 tx/min)."
+  description = "Segundos de espera entre iteraciones de envío continuo por productor (con 2 productores: ~50 tx/min por defecto)."
   type        = number
-  default     = 6
+  default     = 12
 
   validation {
     condition     = var.producer_loop_interval_sec >= 1 && var.producer_loop_interval_sec <= 60
@@ -151,7 +151,7 @@ variable "producer_loop_interval_sec" {
 variable "producer_fraud_pct" {
   description = "Porcentaje de transacciones generadas con patrones de fraude por cada productor on-premise."
   type        = number
-  default     = 20
+  default     = 8
 
   validation {
     condition     = var.producer_fraud_pct >= 0 && var.producer_fraud_pct <= 100

@@ -44,6 +44,12 @@ variable "endpoint_security_group_id" {
   type        = string
 }
 
+variable "dashboard_url" {
+  description = "URL HTTPS del dashboard para enlazar desde el email de resumen de fraude."
+  type        = string
+  default     = ""
+}
+
 variable "summarizer_package_file" {
   description = "Ruta absoluta al paquete .zip del handler summarizer, generado desde app/notification/summarizer/handler.py en la composición raíz."
   type        = string

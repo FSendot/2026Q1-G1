@@ -248,6 +248,8 @@
     .help-text { margin: .35rem 0 0; font-size: .75rem; color: var(--text-soft); }
     .form-message { margin: .45rem 0 0; font-size: .8rem; min-height: 1.2em; color: var(--text-soft); }
     .form-message.error { color: var(--danger); }
+    .form-message.success { color: var(--success); }
+    .invite-action-note { font-size: .78rem; color: var(--text-soft); }
     .form-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
     .form-actions .btn-ghost { width: auto; }
     .table-actions { display: flex; gap: .35rem; justify-content: flex-end; }
@@ -495,6 +497,7 @@
         </div>
         <div class="card" style="margin-bottom:0">
           <p class="card-title">Invitaciones</p>
+          <p id="invite-list-message" class="form-message" hidden></p>
           <div class="table-wrap">
             <table id="invites-table">
               <thead>
