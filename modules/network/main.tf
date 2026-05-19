@@ -72,10 +72,34 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_https_from_vpc" {
   tags = local.module_tags
 }
 
+resource "aws_vpc_security_group_ingress_rule" "endpoints_https_from_additional_cidr" {
+  for_each = toset(var.additional_endpoint_client_cidrs)
+
+  security_group_id = aws_security_group.endpoints.id
+  description       = "HTTPS desde CIDR adicional autorizado"
+  cidr_ipv4         = each.value
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+
+  tags = local.module_tags
+}
+
 resource "aws_vpc_security_group_egress_rule" "endpoints_to_vpc" {
   security_group_id = aws_security_group.endpoints.id
   description       = "Respuestas hacia clientes dentro de la VPC"
   cidr_ipv4         = var.vpc_cidr
+  ip_protocol       = "-1"
+
+  tags = local.module_tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "endpoints_to_additional_cidr" {
+  for_each = toset(var.additional_endpoint_client_cidrs)
+
+  security_group_id = aws_security_group.endpoints.id
+  description       = "Respuestas hacia CIDR adicional autorizado"
+  cidr_ipv4         = each.value
   ip_protocol       = "-1"
 
   tags = local.module_tags

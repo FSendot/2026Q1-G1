@@ -80,6 +80,7 @@ Provisiona la VPC privada que aloja toda la infraestructura. No tiene NAT Gatewa
 - [`module "vpc"`](modules/network/main.tf#L22) (`terraform-aws-modules/vpc/aws`): VPC `10.0.0.0/16` con 2 subnets privadas en distintas AZs; Virtual Private Gateway (VGW) para la VPN site-to-site vía [`enable_vpn_gateway`](modules/network/main.tf#L38)
 - **Gateway VPC Endpoints** (S3, DynamoDB): [`aws_vpc_endpoint.gateway`](modules/network/main.tf#L83)
 - **Interface VPC Endpoints** (SQS, ECR API, ECR DKR, CloudWatch Logs, SNS, Secrets Manager, Cognito IDP): [`aws_vpc_endpoint.interface`](modules/network/main.tf#L97)
+- Cuando la simulación on-prem está habilitada, el Security Group de endpoints también permite HTTPS desde `192.168.0.0/16` para que el EC2 on-prem resuelva `sqs.<region>.amazonaws.com` hacia el VPCE y envíe tráfico por la VPN.
 
 **Módulo externo**: el pin `~> 5.13` está en [`modules/network/main.tf`](modules/network/main.tf#L22); los VPC Endpoints propios son los recursos enlazados arriba.
 

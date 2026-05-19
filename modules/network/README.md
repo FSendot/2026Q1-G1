@@ -13,7 +13,7 @@ The module is intentionally narrow: it does not create NAT gateways, IGWs, or pu
   - The default security group locked down (no ingress, no egress).
 - Provisions Gateway VPC Endpoints for **S3** and **DynamoDB**, attached to all private route tables.
 - Provisions Interface VPC Endpoints for **SQS**, **ECR API**, **ECR DKR**, **CloudWatch Logs**, **SNS**, **Secrets Manager**, and **Cognito IDP** in each private subnet, all sharing one security group. The Cognito IDP endpoint lets the private API Lambda change Cognito passwords without a NAT gateway.
-- Creates a dedicated SG `<project>-endpoints-sg` that accepts HTTPS only from the VPC CIDR.
+- Creates a dedicated SG `<project>-endpoints-sg` that accepts HTTPS from the VPC CIDR and optional additional client CIDRs, such as the simulated on-prem VPC when it reaches SQS through the VPN.
 
 ## Inputs
 
@@ -22,6 +22,7 @@ The module is intentionally narrow: it does not create NAT gateways, IGWs, or pu
 | `project`  | `string`       | n/a     | Prefix for all resource names (`<project>-vpc`, `<project>-endpoints-sg`, ...).        |
 | `vpc_cidr` | `string`       | n/a     | Primary CIDR block of the VPC. Must be a valid IPv4 CIDR.                              |
 | `azs`      | `list(string)` | n/a     | Availability Zones (≥2) where private subnets are created.                             |
+| `additional_endpoint_client_cidrs` | `list(string)` | `[]` | Extra CIDRs allowed to connect to Interface VPC Endpoints over HTTPS. |
 | `tags`     | `map(string)`  | `{}`    | Common tags merged into every resource. The module also adds `Component = "network"`.  |
 
 ## Outputs
@@ -61,5 +62,5 @@ module "network" {
 
 - No IAM roles or users are created.
 - The default security group is locked down (`manage_default_security_group = true`, ingress/egress empty), which addresses Checkov `CKV2_AWS_12`.
-- Interface endpoints accept HTTPS only from the VPC CIDR — never `0.0.0.0/0`.
+- Interface endpoints accept HTTPS only from the VPC CIDR plus explicit additional CIDRs — never `0.0.0.0/0`.
 - VPC Flow Logs are intentionally not provisioned in this module (skipped to keep the lab footprint small); enabling them is a follow-up if Checkov `CKV2_AWS_11` becomes a hard requirement.

@@ -42,10 +42,11 @@ locals {
 module "network" {
   source = "./modules/network"
 
-  project  = local.project
-  vpc_cidr = local.vpc_cidr
-  azs      = local.azs
-  tags     = local.common_tags
+  project                          = local.project
+  vpc_cidr                         = local.vpc_cidr
+  azs                              = local.azs
+  additional_endpoint_client_cidrs = var.enable_onprem_sim ? [local.onprem_vpc_cidr] : []
+  tags                             = local.common_tags
 }
 
 # Cuando la simulación on-premise está activa, la cola sólo acepta

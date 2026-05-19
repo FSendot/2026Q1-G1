@@ -28,6 +28,17 @@ variable "azs" {
   }
 }
 
+variable "additional_endpoint_client_cidrs" {
+  description = "CIDRs adicionales autorizados a conectar por HTTPS a los Interface VPC Endpoints. Usado por la VPC on-premise simulada cuando accede a SQS via VPN."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for cidr in var.additional_endpoint_client_cidrs : can(cidrhost(cidr, 0))])
+    error_message = "Todos los CIDRs adicionales de endpoints deben ser bloques CIDR IPv4 validos."
+  }
+}
+
 variable "tags" {
   description = "Tags comunes a propagar a todos los recursos creados por el módulo (mergeados con tags específicos)."
   type        = map(string)

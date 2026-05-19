@@ -141,7 +141,7 @@ func main() {
 
 	started := time.Now()
 	jobs := make(chan batchJob, concurrency*4)
-	errs := make(chan error, concurrency)
+	errCh := make(chan error, 1)
 	var sent int64
 	var fraudSent int64
 	var scenarioMu sync.Mutex
@@ -167,7 +167,7 @@ func main() {
 				}
 				if err := sendBatch(client, endpoint, queueURL, region, creds, entries); err != nil {
 					select {
-					case errs <- err:
+					case errCh <- err:
 					default:
 					}
 					return
@@ -189,15 +189,20 @@ func main() {
 
 	for index := 1; index <= count; index += 10 {
 		size := minInt(10, count-index+1)
-		jobs <- batchJob{start: index, size: size}
+		select {
+		case err := <-errCh:
+			close(jobs)
+			wg.Wait()
+			fatalf("send failed after %d/%d transaction(s): %v", atomic.LoadInt64(&sent), count, err)
+		case jobs <- batchJob{start: index, size: size}:
+		}
 	}
 	close(jobs)
 	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			fatalf("send failed: %v", err)
-		}
+	select {
+	case err := <-errCh:
+		fatalf("send failed after %d/%d transaction(s): %v", atomic.LoadInt64(&sent), count, err)
+	default:
 	}
 
 	scenarioPayload, _ := json.Marshal(scenarioCounts)
@@ -571,6 +576,10 @@ def main() -> None:
         DocumentName="AWS-RunShellScript",
         Parameters={"commands": [command]},
         Comment=f"send-test-tx count={args.count} fraud_pct={args.fraud_pct} concurrency={args.concurrency}",
+        CloudWatchOutputConfig={
+            "CloudWatchLogGroupName": "/ssm/itba-tp-fraud/send-test-transactions",
+            "CloudWatchOutputEnabled": True,
+        },
     )
     cmd_id = resp["Command"]["CommandId"]
     print(f"SSM command ID: {cmd_id}")
