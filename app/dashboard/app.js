@@ -109,7 +109,26 @@
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   function fmt(n)  { return n != null ? Number(n).toLocaleString("es-AR") : "—"; }
-  function fmtPct(n) { return n != null ? (parseFloat(n) * 100).toFixed(1) + "%" : "—"; }
+  function txFraudScore(tx) {
+    if (!tx) return null;
+    const raw = tx.fraud_score ?? tx.fraudScore ?? tx.score;
+    if (raw == null || raw === "") return null;
+    const n = Number(raw);
+    return Number.isNaN(n) ? null : n;
+  }
+
+  /** Fraud scores from the processor are 0–1; values already on 0–100 are shown as-is. */
+  function fmtFraudScore(value) {
+    if (value == null) return "—";
+    const n = Number(value);
+    if (Number.isNaN(n)) return "—";
+    const pct = n <= 1 ? n * 100 : n;
+    return pct.toFixed(1) + "%";
+  }
+
+  function fmtPct(n) {
+    return fmtFraudScore(n);
+  }
   function fmtDate(iso) {
     if (!iso) return "—";
     try { return new Date(iso).toLocaleString("es-AR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
@@ -800,14 +819,23 @@
     }
 
     const p = gfParams();
-    const hourlyP  = new URLSearchParams(p); hourlyP.set("granularity", "hour"); hourlyP.set("days", "1");
-    const weeklyP  = new URLSearchParams(p); weeklyP.set("granularity", "day");  weeklyP.set("days", "7");
+    const hourlyP  = new URLSearchParams(p); hourlyP.set("granularity", "hour");   hourlyP.set("days", "1");
+    const weeklyP  = new URLSearchParams(p); weeklyP.set("granularity", "day");   weeklyP.set("days", "7");
+    const minuteP  = new URLSearchParams(p); minuteP.set("granularity", "minute"); minuteP.set("minutes", "60");
+    const secondP  = new URLSearchParams(p); secondP.set("granularity", "second"); secondP.set("seconds", "60");
 
-    const [statsR, tsR, weekR, fraudR] = await Promise.allSettled([
+    const [statsR, tsR, weekR, minR, secR, fraudR] = await Promise.allSettled([
       apiFetch("/stats?" + p),
       apiFetch("/stats/timeseries?" + hourlyP),
       apiFetch("/stats/timeseries?" + weeklyP),
-      apiFetch("/transactions?" + gfParams({ is_fraud: "true", limit: 10 })),
+      apiFetch("/stats/timeseries?" + minuteP),
+      apiFetch("/stats/timeseries?" + secondP),
+      apiFetch("/transactions?" + gfParams({
+        is_fraud: "true",
+        limit: 10,
+        sort_by: "fraud_score",
+        sort_order: "desc",
+      })),
     ]);
 
     if (statsR.status === "fulfilled") {
@@ -817,18 +845,20 @@
     }
     if (tsR.status   === "fulfilled") renderHourlyChart(normalizeArrayPayload(tsR.value));
     if (weekR.status === "fulfilled") renderWeeklyChart(normalizeArrayPayload(weekR.value));
+    if (minR.status  === "fulfilled") renderMinuteChart(normalizeArrayPayload(minR.value));
+    if (secR.status  === "fulfilled") renderSecondChart(normalizeArrayPayload(secR.value));
     if (fraudR.status === "fulfilled") renderRecentFraud(normalizeArrayPayload(fraudR.value));
   }
 
   function renderKpis(stats) {
     if (!stats) return;
-    const rate = stats.fraud_rate != null ? (stats.fraud_rate * 100).toFixed(1) + "%" : "—";
-    const avg  = stats.avg_fraud_score != null ? (stats.avg_fraud_score * 100).toFixed(1) + "%" : "—";
+    const rate = stats.fraud_rate != null ? fmtFraudScore(stats.fraud_rate) : "—";
+    const avg  = fmtFraudScore(stats.avg_fraud_score);
     $("kpi-grid").innerHTML = [
       kpiCard(fmt(stats.total),   "Procesadas",     ""),
       kpiCard(fmt(stats.fraud),   "Fraudes",        stats.fraud > 0 ? "danger" : ""),
       kpiCard(rate,               "Tasa fraude",    stats.fraud_rate > 0.05 ? "danger" : ""),
-      kpiCard(avg,                "Score promedio", ""),
+      kpiCard(avg,                "Score prom. (todas)", ""),
       kpiCard(fmt(stats.allowed), "Permitidas",     "success"),
       kpiCard(fmt(stats.blocked), "Bloqueadas",     ""),
     ].join("");
@@ -994,11 +1024,76 @@
     attachSvgTooltips($("weekly-svg"));
   }
 
+  function renderMinuteChart(data) {
+    const wrap = $("chart-minute-wrap");
+    if (!wrap) return;
+    if (!data) { wrap.innerHTML = '<p class="empty-msg">Sin datos.</p>'; return; }
+
+    const byMinute = {};
+    data.forEach(d => {
+      try { byMinute[new Date(d.hour).toISOString().slice(0, 16)] = d; } catch (_) {}
+    });
+
+    const slots = [];
+    const base = new Date();
+    base.setSeconds(0, 0);
+    for (let i = 59; i >= 0; i--) {
+      const m = new Date(base);
+      m.setMinutes(m.getMinutes() - i);
+      const row = byMinute[m.toISOString().slice(0, 16)] || {};
+      slots.push({ m, total: Number(row.total) || 0, fraud: Number(row.fraud) || 0 });
+    }
+
+    const labelFn = (s, short) => short
+      ? String(s.m.getHours()).padStart(2, "0") + ":" + String(s.m.getMinutes()).padStart(2, "0")
+      : String(s.m.getHours()).padStart(2, "0") + ":" + String(s.m.getMinutes()).padStart(2, "0");
+
+    const W = 560, H = 180;
+    wrap.innerHTML = `
+      <svg id="minute-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" class="chart-svg">
+        ${_buildBarSvg(slots, labelFn, 10)}
+      </svg>${_chartLegend()}`;
+    attachSvgTooltips($("minute-svg"));
+  }
+
+  function renderSecondChart(data) {
+    const wrap = $("chart-second-wrap");
+    if (!wrap) return;
+    if (!data) { wrap.innerHTML = '<p class="empty-msg">Sin datos.</p>'; return; }
+
+    const bySecond = {};
+    data.forEach(d => {
+      try { bySecond[new Date(d.hour).toISOString().slice(0, 19)] = d; } catch (_) {}
+    });
+
+    const slots = [];
+    const base = new Date();
+    for (let i = 59; i >= 0; i--) {
+      const s = new Date(base);
+      s.setSeconds(s.getSeconds() - i, 0);
+      const row = bySecond[s.toISOString().slice(0, 19)] || {};
+      slots.push({ s, total: Number(row.total) || 0, fraud: Number(row.fraud) || 0 });
+    }
+
+    const labelFn = (slot, short) => short
+      ? String(slot.s.getSeconds()).padStart(2, "0") + "s"
+      : String(slot.s.getHours()).padStart(2, "0") + ":" +
+        String(slot.s.getMinutes()).padStart(2, "0") + ":" +
+        String(slot.s.getSeconds()).padStart(2, "0");
+
+    const W = 560, H = 180;
+    wrap.innerHTML = `
+      <svg id="second-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" class="chart-svg">
+        ${_buildBarSvg(slots, labelFn, 10)}
+      </svg>${_chartLegend()}`;
+    attachSvgTooltips($("second-svg"));
+  }
+
   function renderRecentFraud(rows) {
     const tbody = document.querySelector("#recent-fraud-table tbody");
     if (!tbody) return;
     if (!rows || rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty-row">Sin transacciones fraudulentas recientes.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-row">Sin transacciones fraudulentas recientes.</td></tr>';
       return;
     }
     tbody.innerHTML = rows.map(tx => `<tr>
@@ -1007,7 +1102,8 @@
       <td>${esc(fmtAmount(tx.amount, tx.currency))}</td>
       <td>${esc(tx.country)}</td>
       <td>${esc(tx.channel)}</td>
-      <td>${esc(fmtPct(tx.fraud_score))}</td>
+      <td>${esc(fmtFraudScore(txFraudScore(tx)))}</td>
+      <td>${decisionPill(tx.decision || (tx.is_fraud ? "block" : "allow"))}</td>
       <td>${esc(fmtDate(tx.processed_at))}</td>
     </tr>`).join("");
   }
@@ -1046,7 +1142,7 @@
         <td>${esc(fmtAmount(tx.amount, tx.currency))}</td>
         <td>${esc(tx.country)}</td>
         <td>${esc(tx.channel)}</td>
-        <td>${esc(fmtPct(tx.fraud_score))}</td>
+        <td>${esc(fmtFraudScore(txFraudScore(tx)))}</td>
         <td>${decisionPill(tx.decision)}</td>
         <td>${esc(fmtDate(tx.processed_at))}</td>
       </tr>`).join("");
@@ -1091,7 +1187,7 @@
         <td>${fmt(u.total_transactions)}</td>
         <td>${fmt(u.fraud_count)}</td>
         <td>${esc(rate)}</td>
-        <td>${esc(fmtPct(u.avg_fraud_score))}</td>
+        <td>${esc(fmtFraudScore(u.avg_fraud_score))}</td>
         <td>${esc(fmtDate(u.last_seen))}</td>
       </tr>`;
     }).join("");
@@ -1119,7 +1215,7 @@
         <td>${esc(fmtAmount(tx.amount, tx.currency))}</td>
         <td>${esc(tx.country)}</td>
         <td>${esc(tx.channel)}</td>
-        <td>${esc(fmtPct(tx.fraud_score))}</td>
+        <td>${esc(fmtFraudScore(txFraudScore(tx)))}</td>
         <td>${decisionPill(tx.decision)}</td>
         <td>${esc(fmtDate(tx.processed_at))}</td>
       </tr>`).join("") || '<tr><td colspan="7" class="empty-row">Sin transacciones.</td></tr>';
@@ -1129,7 +1225,7 @@
           ${kpiCard(fmt(u.total_transactions), "Transacciones", "")}
           ${kpiCard(fmt(u.fraud_count), "Fraudes", u.fraud_count > 0 ? "danger" : "success")}
           ${kpiCard(rate, "Tasa fraude", u.fraud_count > 0 ? "danger" : "")}
-          ${kpiCard(fmtPct(u.avg_fraud_score), "Score prom.", "")}
+          ${kpiCard(fmtFraudScore(u.avg_fraud_score), "Score prom.", "")}
         </div>
         <h4>Últimas 10 transacciones</h4>
         <div class="table-wrap">

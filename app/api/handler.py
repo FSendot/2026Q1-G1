@@ -667,13 +667,20 @@ def _get_stats_timeseries(query):
     _ensure_schema(conn)
 
     granularity = query.get("granularity", "hour")
-    if granularity not in ("hour", "day"):
+    if granularity not in ("second", "minute", "hour", "day"):
         granularity = "hour"
 
-    days = _parse_int(query.get("days"), 1, minimum=1, maximum=90)
+    if granularity == "second":
+        seconds = _parse_int(query.get("seconds"), 60, minimum=1, maximum=3600)
+        time_clause = f"processed_at >= NOW() - INTERVAL '{seconds} seconds'"
+    elif granularity == "minute":
+        minutes = _parse_int(query.get("minutes"), 60, minimum=1, maximum=1440)
+        time_clause = f"processed_at >= NOW() - INTERVAL '{minutes} minutes'"
+    else:
+        days = _parse_int(query.get("days"), 1, minimum=1, maximum=90)
+        time_clause = f"processed_at >= NOW() - INTERVAL '{days} days'"
 
     where, params = _build_where(query)
-    time_clause = f"processed_at >= NOW() - INTERVAL '{days} days'"
     full_where = (where + f" AND {time_clause}") if where else f"WHERE {time_clause}"
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:

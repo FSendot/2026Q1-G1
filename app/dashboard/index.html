@@ -154,6 +154,13 @@
 
     /* ── Timeseries chart ───────────────────────────────── */
     .chart-wrap { min-height: 180px; }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
     .chart-svg { width: 100%; height: auto; display: block; }
     .chart-legend { display: flex; gap: 1.25rem; margin-top: .65rem; font-size: .75rem; color: var(--text-soft); }
     .legend-item { display: flex; align-items: center; gap: .35rem; }
@@ -379,8 +386,8 @@
         </div>
       </div>
 
-      <!-- Timeseries 24h + 7d -->
-      <div class="two-col" style="margin-top:1rem;grid-template-columns:1fr 1fr">
+      <!-- Timeseries -->
+      <div class="chart-grid">
         <div class="card" style="margin-bottom:0">
           <p class="card-title">Actividad — últimas 24 horas</p>
           <div id="chart-wrap" class="chart-wrap"><p class="empty-msg">Cargando…</p></div>
@@ -388,6 +395,14 @@
         <div class="card" style="margin-bottom:0">
           <p class="card-title">Actividad — últimos 7 días</p>
           <div id="chart-weekly-wrap" class="chart-wrap"><p class="empty-msg">Cargando…</p></div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Actividad — última hora</p>
+          <div id="chart-minute-wrap" class="chart-wrap"><p class="empty-msg">Cargando…</p></div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <p class="card-title">Actividad — último minuto</p>
+          <div id="chart-second-wrap" class="chart-wrap"><p class="empty-msg">Cargando…</p></div>
         </div>
       </div>
 
@@ -397,9 +412,9 @@
         <div class="table-wrap">
           <table id="recent-fraud-table">
             <thead>
-              <tr><th>ID</th><th>Usuario</th><th>Monto</th><th>País</th><th>Canal</th><th>Score</th><th>Procesada</th></tr>
+              <tr><th>ID</th><th>Usuario</th><th>Monto</th><th>País</th><th>Canal</th><th>Score</th><th>Decisión</th><th>Procesada</th></tr>
             </thead>
-            <tbody><tr><td colspan="7" class="loading-row">Cargando…</td></tr></tbody>
+            <tbody><tr><td colspan="8" class="loading-row">Cargando…</td></tr></tbody>
           </table>
         </div>
       </div>
