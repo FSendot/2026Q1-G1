@@ -2,7 +2,7 @@
 
 Composition module for the buffered path between the processor and the RDS results store. It owns the results SQS queue plus DLQ, a VPC-attached Lambda, and the event source mapping that drains SQS into PostgreSQL.
 
-The Lambda now uses the Lambda OS-only/custom runtime path: the deployment package passed through `package_file` must contain an executable named `bootstrap` at the zip root. The root composition builds that zip from `app/results_writer` before `terraform plan`.
+The Lambda now uses the Lambda OS-only/custom runtime path: the deployment package passed through `package_file` must contain an executable named `bootstrap` at the zip root. Root workflows build that zip from `app/results_writer` before Terraform evaluates the Lambda `source_code_hash`.
 
 The writer batches the full SQS invocation into a single database transaction, creates the `transactions` table if needed, and performs bulk `INSERT ... VALUES ... ON CONFLICT (transaction_id) DO NOTHING` statements. Raw JSON payloads and SNS-style envelopes with a `Message` JSON body are both accepted.
 
@@ -57,6 +57,8 @@ The deployment package is expected from the root composition at `app/results_wri
 1. Compile the Go binary for Linux x86_64.
 2. Name the binary `bootstrap`.
 3. Zip that binary at the root of the archive.
+
+The generated zip is ignored by git. Use `make build-results-writer` before any direct `terraform plan`, `terraform apply`, or `terraform validate` call; the repo Make targets and GitHub Actions workflows run that build step before Terraform.
 
 ## Example
 

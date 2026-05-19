@@ -8,6 +8,7 @@ on:
       - "app/processor/**"
       - "app/api/**"
       - "app/dashboard/**"
+      - "app/results_writer/**"
       - "app/net/serving/go/**"
       - "modules/**"
       - "scripts/**"
@@ -23,6 +24,7 @@ on:
       - "app/processor/**"
       - "app/api/**"
       - "app/dashboard/**"
+      - "app/results_writer/**"
       - "app/net/serving/go/**"
       - "modules/**"
       - "scripts/**"
@@ -111,9 +113,20 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set up Go for Lambda builds
+        if: github.ref == 'refs/heads/main'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: app/results_writer/go.mod
+          cache-dependency-path: app/results_writer/go.sum
+
       - name: Build Lambda layers
         if: github.ref == 'refs/heads/main'
         run: make build-layers
+
+      - name: Build results-writer Lambda
+        if: github.ref == 'refs/heads/main'
+        run: make build-results-writer
 
       - name: Initialize Terraform
         if: github.ref == 'refs/heads/main'

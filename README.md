@@ -245,7 +245,10 @@ cp terraform.tfvars.example terraform.tfvars
 
 ```bash
 make build-layers
+make build-results-writer
 ```
+
+`make plan` y `make validate` también ejecutan estos builds antes de llamar a Terraform. Si se invoca `terraform plan`, `terraform apply` o `terraform validate` directamente, estos artefactos deben existir de antemano porque Terraform calcula sus hashes durante la evaluación del plan.
 
 ### 2. Inicializar Terraform
 
@@ -437,9 +440,9 @@ El repositorio tiene tres pipelines de GitHub Actions:
 
 | Workflow | Trigger | Qué hace |
 |----------|---------|----------|
-| **Validate** | Todo push y PR | `terraform fmt -check` + `terraform validate` |
-| **Plan** | Push a `main` y PRs contra `main` | `terraform plan` y postea el diff como comentario en el PR |
-| **Docker** | Cambios en `app/`, `modules/`, `scripts/`, `templates/` o PR/push a `main` | Valida builds, reutiliza una imagen de procesador existente si el hash de fuentes ya está en ECR, crea/pushea imagen cuando el registry está vacío o cambió el procesador, ejecuta `terraform apply` y despliega el dashboard a S3 |
+| **Validate** | Todo push y PR | Construye los artefactos Lambda generados, ejecuta `terraform fmt -check` y `terraform validate` |
+| **Plan** | Push a `main` y PRs contra `main` | Construye los artefactos Lambda generados, ejecuta `terraform plan` y postea el diff como comentario en el PR |
+| **Docker** | Cambios en `app/`, `modules/`, `scripts/`, `templates/` o PR/push a `main` | Valida builds, reutiliza una imagen de procesador existente si el hash de fuentes ya está en ECR, construye los artefactos Lambda generados, crea/pushea imagen cuando el registry está vacío o cambió el procesador, ejecuta `terraform apply` y despliega el dashboard a S3 |
 
 Los secrets necesarios en GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`.
 

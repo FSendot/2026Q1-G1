@@ -24,6 +24,8 @@ Always plan before applying:
 make plan
 ```
 
+- `make plan` builds the generated Lambda artifacts Terraform hashes during planning, including `layers/psycopg2/psycopg2-layer.zip` and `app/results_writer/build/results-writer.zip`.
+- If a CI job or script calls `terraform plan` directly, it must run `make build-layers` and `make build-results-writer` first.
 - Save the plan output. Attach it to the PR.
 - Read the diff. If anything is unexpected, stop and investigate.
 
@@ -60,5 +62,6 @@ If someone changes infrastructure outside of Terraform:
 
 - Forgetting to run `terraform init` after editing `versions.tf` or provider blocks.
 - Running raw `terraform init` and entering an arbitrary S3 bucket. The backend bucket must be `itba-tp-fraud-tfstate-<account-id>` and is created/configured by `make init`.
+- Running raw `terraform plan` without first building generated Lambda packages. The results-writer package is ignored by git and must exist before Terraform evaluates its `source_code_hash`.
 - Applying a stale plan after someone else merged a change.
 - Running `terraform apply` from the wrong working directory.
