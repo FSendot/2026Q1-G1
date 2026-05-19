@@ -97,11 +97,8 @@ def _build_summary_text(
     channels,
     highest_risk,
     *,
-    interval_minutes,
     generated_at,
     dashboard_url,
-    truncated,
-    raw_messages,
 ):
     lines = [
         "══════════════════════════════════════",
@@ -109,15 +106,9 @@ def _build_summary_text(
         "══════════════════════════════════════",
         "",
         f"Generado : {generated_at.strftime('%d/%m/%Y %H:%M')} UTC",
-        f"Ventana  : últimos {interval_minutes} minutos",
-        f"Fraudes  : {len(rows)} transacción(es)",
+        "",
+        "── Dashboard ──────────────────────────",
     ]
-    if truncated:
-        lines.append(
-            f"Nota     : límite de {len(rows)} eventos por correo; puede haber más en cola."
-        )
-
-    lines.extend(["", "── Dashboard ──────────────────────────"])
     if dashboard_url:
         lines.extend(["Abrir panel:", dashboard_url, ""])
     else:
@@ -167,16 +158,13 @@ def _build_summary_text(
 
     lines.extend(["", "──────────────────────────────────────"])
     lines.append("Correo automático del laboratorio Fraud Detector.")
-    if raw_messages > len(rows):
-        lines.append(f"Mensajes SQS procesados: {raw_messages}")
 
     return "\n".join(lines)
 
 
-def _build_summary(events, *, interval_minutes, dashboard_url, max_messages):
+def _build_summary(events, *, dashboard_url):
     rows, currencies, users, countries, channels, highest_risk = _aggregate_events(events)
     generated_at = datetime.now(timezone.utc).replace(microsecond=0)
-    truncated = len(events) >= max_messages and len(rows) >= max_messages
 
     text_body = _build_summary_text(
         rows,
@@ -185,13 +173,13 @@ def _build_summary(events, *, interval_minutes, dashboard_url, max_messages):
         countries,
         channels,
         highest_risk,
-        interval_minutes=interval_minutes,
         generated_at=generated_at,
         dashboard_url=dashboard_url,
-        truncated=truncated,
-        raw_messages=len(events),
     )
     return text_body, len(rows)
+
+
+EMAIL_SUBJECT = "Resumen de fraude — Dashboard ITBA"
 
 
 def _publish_summary(topic_arn, subject, text_body):
@@ -207,7 +195,6 @@ def handler(event, context):
     queue_url = os.environ["FRAUD_ALERT_QUEUE_URL"]
     topic_arn = os.environ["SUMMARY_TOPIC_ARN"]
     max_messages = int(os.environ.get("MAX_MESSAGES_PER_RUN", "500"))
-    interval_minutes = int(os.environ.get("SUMMARY_INTERVAL_MINUTES", "7"))
     dashboard_url = os.environ.get("DASHBOARD_URL", "").strip()
 
     messages = _receive_messages(queue_url, max_messages)
@@ -224,9 +211,7 @@ def handler(event, context):
 
     text_body, event_count = _build_summary(
         events,
-        interval_minutes=interval_minutes,
         dashboard_url=dashboard_url,
-        max_messages=max_messages,
     )
     if event_count == 0:
         logger.info(json.dumps({"action": "fraud_summary_no_valid_events", "messages": len(messages)}))
@@ -235,7 +220,7 @@ def handler(event, context):
 
     _publish_summary(
         topic_arn,
-        f"Resumen de fraude: {event_count} evento(s)",
+        EMAIL_SUBJECT,
         text_body,
     )
     _delete_messages(queue_url, messages)
