@@ -108,6 +108,16 @@ variable "jwt_audience" {
   }
 }
 
+variable "package_file" {
+  description = "Ruta absoluta al paquete .zip de la Lambda API, generado desde app/api/handler.py en la composición raíz."
+  type        = string
+
+  validation {
+    condition     = length(var.package_file) > 0 && endswith(var.package_file, ".zip")
+    error_message = "package_file debe ser la ruta a un archivo .zip existente."
+  }
+}
+
 variable "log_retention_days" {
   description = "Días de retención de los logs en CloudWatch Logs."
   type        = number

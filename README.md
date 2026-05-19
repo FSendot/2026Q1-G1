@@ -473,7 +473,7 @@ Los secrets necesarios en GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, 
 ├── app/
 │   ├── processor/           # Motor de scoring en Go (SQS consumer → SQS publishers)
 │   ├── notification/        # Código Python de la Lambda summarizer de alertas
-│   ├── api/                 # API Flask (referencia/CI check, no deployada como Lambda)
+│   ├── api/                 # Dashboard API Lambda handler (Python)
 │   └── dashboard/           # Frontend vanilla JS (index.html, app.js)
 ├── layers/
 │   └── psycopg2/            # Layer psycopg2 (generado por make build-layers)

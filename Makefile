@@ -54,9 +54,49 @@ fmt-check:
 	terraform fmt -check -recursive
 
 validate: $(PSYCOPG2_ZIP) build-results-writer
+	@mkdir -p app/api/build app/notification/build
 	@for d in $$(find . -type f -name '*.tf' -not -path '*/.*' -exec dirname {} \; | sort -u); do \
 		echo "==> $$d"; \
-		(cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
+		if [ "$$d" = "./modules/dashboard" ]; then \
+			(cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate \
+			  -var="index_html_path=$$(pwd)/app/dashboard/index.html" \
+			  -var="app_js_path=$$(pwd)/app/dashboard/app.js" \
+			  -var="config_js_template_path=$$(pwd)/app/dashboard/config.js.tpl" \
+			  -var="api_endpoint=https://example.com" \
+			  -var="cognito_user_pool_id=us-east-1_example" \
+			  -var="cognito_client_id=example" \
+			  -var="cognito_domain_url=https://example.auth.us-east-1.amazoncognito.com" \
+			  -var="cognito_hosted_ui_base_url=https://example.auth.us-east-1.amazoncognito.com" \
+			  -var="cognito_issuer=https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example" \
+			  -var="cognito_redirect_uri=https://example.com/" \
+			  -var="cognito_logout_uri=https://example.com/") || exit 1; \
+		elif [ "$$d" = "./modules/api" ]; then \
+			(cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate \
+			  -var="package_file=$$(pwd)/app/api/build/api.zip" \
+			  -var="project=test" \
+			  -var="principal_arn=arn:aws:iam::123456789012:role/LabRole" \
+			  -var="vpc_id=vpc-123" \
+			  -var="private_subnet_ids=[\"subnet-1\"]" \
+			  -var="endpoint_security_group_id=sg-123" \
+			  -var="psycopg2_layer_arn=arn:aws:lambda:us-east-1:123456789012:layer:psycopg2:1" \
+			  -var="db_host=localhost" \
+			  -var="db_password=secret" \
+			  -var="sns_topic_arn=arn:aws:sns:us-east-1:123456789012:topic" \
+			  -var="jwt_issuer=https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example" \
+			  -var="jwt_audience=client") || exit 1; \
+		elif [ "$$d" = "./modules/notification/summarizer" ]; then \
+			(cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate \
+			  -var="package_file=$$(pwd)/app/notification/build/summarizer.zip" \
+			  -var="project=test" \
+			  -var="principal_arn=arn:aws:iam::123456789012:role/LabRole" \
+			  -var="vpc_id=vpc-123" \
+			  -var="private_subnet_ids=[\"subnet-1\"]" \
+			  -var="endpoint_security_group_id=sg-123" \
+			  -var="fraud_alert_queue_url=https://sqs.us-east-1.amazonaws.com/123/queue" \
+			  -var="summary_topic_arn=arn:aws:sns:us-east-1:123456789012:topic") || exit 1; \
+		else \
+			(cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
+		fi; \
 	done
 
 lint:
@@ -96,6 +136,7 @@ init:
 	terraform init -migrate-state -force-copy -backend-config="bucket=$${BUCKET}"
 
 plan: $(PSYCOPG2_ZIP) build-results-writer
+	@mkdir -p app/api/build app/notification/build
 	TF_VAR_google_oauth_client_id="$(GOOGLE_OAUTH_CLIENT_ID)" \
 	TF_VAR_google_oauth_client_secret="$(GOOGLE_OAUTH_CLIENT_SECRET)" \
 	terraform plan -out=tfplan

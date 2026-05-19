@@ -29,9 +29,14 @@ variable "endpoint_security_group_id" {
   type        = string
 }
 
-variable "source_file" {
-  description = "Ruta del handler Python a empaquetar en la Lambda. El código de negocio debe vivir fuera del módulo de infraestructura."
+variable "package_file" {
+  description = "Ruta absoluta al paquete .zip del handler summarizer, generado en la composición raíz."
   type        = string
+
+  validation {
+    condition     = length(var.package_file) > 0 && endswith(var.package_file, ".zip")
+    error_message = "package_file debe ser la ruta a un archivo .zip existente."
+  }
 }
 
 variable "fraud_alert_queue_url" {

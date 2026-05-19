@@ -15,6 +15,9 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 | Name      | Type          | Default | Description                                      |
 | --------- | ------------- | ------- | ------------------------------------------------ |
 | `project` | `string`      | n/a     | Prefix for the dashboard bucket name; the module appends the current AWS account id. |
+| `index_html_path` | `string` | n/a | Absolute path to `app/dashboard/index.html`. |
+| `app_js_path` | `string` | n/a | Absolute path to `app/dashboard/app.js`. |
+| `config_js_template_path` | `string` | n/a | Absolute path to `app/dashboard/config.js.tpl`. |
 | `api_endpoint` | `string` | n/a | API Gateway endpoint used for the bootstrap `config.js`. |
 | `cognito_user_pool_id` | `string` | n/a | Cognito user pool ID written into `config.js`. |
 | `cognito_client_id` | `string` | n/a | Cognito app client ID written into `config.js`. |

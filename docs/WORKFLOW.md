@@ -24,7 +24,7 @@ Always plan before applying:
 make plan
 ```
 
-- `make plan` builds the generated Lambda artifacts Terraform hashes during planning, including `layers/psycopg2/psycopg2-layer.zip` and `app/results_writer/build/results-writer.zip`.
+- `make plan` builds the generated Lambda artifacts Terraform hashes during planning, including `layers/psycopg2/psycopg2-layer.zip`, `app/results_writer/build/results-writer.zip`, and the Python zips under `app/api/build/` and `app/notification/build/` (via `lambdas.tf`).
 - If a CI job or script calls `terraform plan` directly, it must run `make build-layers` and `make build-results-writer` first.
 - Save the plan output. Attach it to the PR.
 - Read the diff. If anything is unexpected, stop and investigate.

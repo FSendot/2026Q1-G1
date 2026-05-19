@@ -53,6 +53,8 @@ __pycache__/
 
 # Lambda deployment packages generados por archive_file (data source de Terraform)
 **/handler.zip
+app/api/build/
+app/notification/build/
 app/results_writer/build/
 
 # Lambda layers — artefactos de build generados por make build-layers
