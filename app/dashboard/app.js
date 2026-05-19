@@ -806,30 +806,106 @@
   }
 
   // ── Overview ───────────────────────────────────────────────────────────────
-  async function loadOverview() {
-    setStatus("loading");
+  const CHART_SPECS = {
+    hourly: {
+      wrapId: "chart-wrap",
+      buildQuery(p) {
+        const q = new URLSearchParams(p);
+        q.set("granularity", "hour");
+        q.set("days", "1");
+        return q;
+      },
+      render: renderHourlyChart,
+    },
+    weekly: {
+      wrapId: "chart-weekly-wrap",
+      buildQuery(p) {
+        const q = new URLSearchParams(p);
+        q.set("granularity", "day");
+        q.set("days", "7");
+        return q;
+      },
+      render: renderWeeklyChart,
+    },
+    minute: {
+      wrapId: "chart-minute-wrap",
+      buildQuery(p) {
+        const q = new URLSearchParams(p);
+        q.set("granularity", "minute");
+        q.set("minutes", "60");
+        return q;
+      },
+      render: renderMinuteChart,
+    },
+    second: {
+      wrapId: "chart-second-wrap",
+      buildQuery(p) {
+        const q = new URLSearchParams(p);
+        q.set("granularity", "second");
+        q.set("seconds", "60");
+        return q;
+      },
+      render: renderSecondChart,
+    },
+  };
+
+  function setChartLoading(chartKey) {
+    const wrap = $(CHART_SPECS[chartKey]?.wrapId);
+    if (wrap) wrap.innerHTML = '<p class="empty-msg">Cargando…</p>';
+  }
+
+  function setChartError(chartKey, message) {
+    const wrap = $(CHART_SPECS[chartKey]?.wrapId);
+    if (wrap) wrap.innerHTML = `<p class="empty-msg">${esc(message)}</p>`;
+  }
+
+  async function reloadActivityChart(chartKey, triggerBtn) {
+    const spec = CHART_SPECS[chartKey];
+    if (!spec) return;
+
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.classList.add("spinning");
+    }
+    setChartLoading(chartKey);
     clearErr("overview");
+
     try {
-      const h = normalizeEnvelope(await apiFetch("/health"));
-      setStatus(h?.status === "ok" ? "online" : "offline");
+      const res = await apiFetch("/stats/timeseries?" + spec.buildQuery(gfParams()));
+      spec.render(normalizeArrayPayload(res));
     } catch (e) {
-      setStatus("offline");
-      showErr("overview", "No se pudo contactar la API: " + e.message);
-      return;
+      setChartError(chartKey, e.message || "No se pudo actualizar el gráfico.");
+    } finally {
+      if (triggerBtn) {
+        triggerBtn.disabled = false;
+        triggerBtn.classList.remove("spinning");
+      }
+    }
+  }
+
+  async function loadOverview({ checkHealth = true } = {}) {
+    if (checkHealth) {
+      setStatus("loading");
+      clearErr("overview");
+      try {
+        const h = normalizeEnvelope(await apiFetch("/health"));
+        setStatus(h?.status === "ok" ? "online" : "offline");
+      } catch (e) {
+        setStatus("offline");
+        showErr("overview", "No se pudo contactar la API: " + e.message);
+        return;
+      }
     }
 
     const p = gfParams();
-    const hourlyP  = new URLSearchParams(p); hourlyP.set("granularity", "hour");   hourlyP.set("days", "1");
-    const weeklyP  = new URLSearchParams(p); weeklyP.set("granularity", "day");   weeklyP.set("days", "7");
-    const minuteP  = new URLSearchParams(p); minuteP.set("granularity", "minute"); minuteP.set("minutes", "60");
-    const secondP  = new URLSearchParams(p); secondP.set("granularity", "second"); secondP.set("seconds", "60");
+    Object.keys(CHART_SPECS).forEach(setChartLoading);
 
     const [statsR, tsR, weekR, minR, secR, fraudR] = await Promise.allSettled([
       apiFetch("/stats?" + p),
-      apiFetch("/stats/timeseries?" + hourlyP),
-      apiFetch("/stats/timeseries?" + weeklyP),
-      apiFetch("/stats/timeseries?" + minuteP),
-      apiFetch("/stats/timeseries?" + secondP),
+      apiFetch("/stats/timeseries?" + CHART_SPECS.hourly.buildQuery(p)),
+      apiFetch("/stats/timeseries?" + CHART_SPECS.weekly.buildQuery(p)),
+      apiFetch("/stats/timeseries?" + CHART_SPECS.minute.buildQuery(p)),
+      apiFetch("/stats/timeseries?" + CHART_SPECS.second.buildQuery(p)),
       apiFetch("/transactions?" + gfParams({
         is_fraud: "true",
         limit: 10,
@@ -843,10 +919,18 @@
       renderKpis(stats);
       renderPie(stats);
     }
-    if (tsR.status   === "fulfilled") renderHourlyChart(normalizeArrayPayload(tsR.value));
+    if (tsR.status === "fulfilled") renderHourlyChart(normalizeArrayPayload(tsR.value));
+    else if (tsR.status === "rejected") setChartError("hourly", tsR.reason?.message || "Error al cargar.");
+
     if (weekR.status === "fulfilled") renderWeeklyChart(normalizeArrayPayload(weekR.value));
-    if (minR.status  === "fulfilled") renderMinuteChart(normalizeArrayPayload(minR.value));
-    if (secR.status  === "fulfilled") renderSecondChart(normalizeArrayPayload(secR.value));
+    else if (weekR.status === "rejected") setChartError("weekly", weekR.reason?.message || "Error al cargar.");
+
+    if (minR.status === "fulfilled") renderMinuteChart(normalizeArrayPayload(minR.value));
+    else if (minR.status === "rejected") setChartError("minute", minR.reason?.message || "Error al cargar.");
+
+    if (secR.status === "fulfilled") renderSecondChart(normalizeArrayPayload(secR.value));
+    else if (secR.status === "rejected") setChartError("second", secR.reason?.message || "Error al cargar.");
+
     if (fraudR.status === "fulfilled") renderRecentFraud(normalizeArrayPayload(fraudR.value));
   }
 
@@ -1458,6 +1542,10 @@
     $("btn-refresh").addEventListener("click", () => {
       const active = document.querySelector(".tab-btn.active");
       if (active) setTab(active.dataset.tab);
+    });
+
+    qsa(".chart-reload").forEach(btn => {
+      btn.addEventListener("click", () => reloadActivityChart(btn.dataset.chart, btn));
     });
 
     // Tabs
