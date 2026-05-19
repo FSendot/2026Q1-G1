@@ -1,46 +1,10 @@
 name: Deploy
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "app/processor/**"
-      - "app/dashboard/**"
-      - "app/results_writer/**"
-      - "app/net/serving/go/**"
-      - "modules/**"
-      - "scripts/**"
-      - "templates/**"
-      - ".github/workflows/deploy.yml"
-      - "main.tf"
-      - "variables.tf"
-      - "outputs.tf"
-      - "versions.tf"
-      - "backend.tf"
-      - "lambdas.tf"
-  push:
-    branches:
-      - main
-    paths:
-      - "app/processor/**"
-      - "app/dashboard/**"
-      - "app/results_writer/**"
-      - "app/net/serving/go/**"
-      - "modules/**"
-      - "scripts/**"
-      - "templates/**"
-      - ".github/workflows/deploy.yml"
-      - "main.tf"
-      - "variables.tf"
-      - "outputs.tf"
-      - "versions.tf"
-      - "backend.tf"
-      - "lambdas.tf"
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Escribir "deploy" para confirmar el deploy manual'
+        description: 'Escribir "deploy" para confirmar el deploy'
         required: true
         type: string
 
@@ -50,6 +14,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'deploy'
 
     env:
       AWS_REGION: us-east-1
@@ -90,28 +55,13 @@ jobs:
           echo "key=${source_key}" >> "$GITHUB_OUTPUT"
           echo "tag=processor-src-${source_key}" >> "$GITHUB_OUTPUT"
 
-      - name: Build processor image for validation
-        if: github.ref != 'refs/heads/main'
-        run: docker build -f app/processor/Dockerfile -t "fraud-worker:${GITHUB_SHA}" app
-
-      - name: Build dashboard static export
-        if: github.ref != 'refs/heads/main'
-        run: |
-          docker build \
-            -f app/dashboard/Dockerfile \
-            --target export \
-            --output type=local,dest=dashboard-dist \
-            app
-
       - name: Set up Terraform
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "~> 1.9"
           terraform_wrapper: false
 
       - name: Configure AWS credentials
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         uses: aws-actions/configure-aws-credentials@v5
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -120,26 +70,21 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Go for Lambda builds
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         uses: actions/setup-go@v6
         with:
           go-version-file: app/results_writer/go.mod
           cache-dependency-path: app/results_writer/go.sum
 
       - name: Build Lambda layers
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: make build-layers
 
       - name: Build results-writer Lambda
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: make build-results-writer
 
       - name: Initialize Terraform
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: make init
 
       - name: Bootstrap ECR repository
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: |
           terraform output -raw ecr_repository_url >/tmp/ecr_repository_url 2>/dev/null || true
           if grep -Eq '^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+' /tmp/ecr_repository_url; then
@@ -151,7 +96,6 @@ jobs:
           terraform apply -auto-approve tfplan-bootstrap-ecr
 
       - name: Read ECR image metadata
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         id: ecr
         run: |
           terraform output -raw ecr_repository_url >/tmp/ecr_repository_url 2>/dev/null || true
@@ -174,7 +118,6 @@ jobs:
           echo "processor_source_image=${ecr_url}:${{ steps.processor_source.outputs.tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve processor image deployment
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         id: processor_image
         shell: bash
         run: |
@@ -201,15 +144,15 @@ jobs:
           echo "final_image=${final_image}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ECR
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy') && steps.processor_image.outputs.should_build == 'true'
+        if: steps.processor_image.outputs.should_build == 'true'
         run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${{ steps.ecr.outputs.registry }}"
 
       - name: Build processor image
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy') && steps.processor_image.outputs.should_build == 'true'
+        if: steps.processor_image.outputs.should_build == 'true'
         run: docker build -f app/processor/Dockerfile -t "fraud-worker:${GITHUB_SHA}" app
 
       - name: Tag processor image for ECR
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy') && steps.processor_image.outputs.should_build == 'true'
+        if: steps.processor_image.outputs.should_build == 'true'
         run: |
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.processor_image }}"
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.processor_source_image }}"
@@ -217,7 +160,7 @@ jobs:
           docker tag "fraud-worker:${GITHUB_SHA}" "${{ steps.ecr.outputs.url }}:latest"
 
       - name: Push processor image
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy') && steps.processor_image.outputs.should_build == 'true'
+        if: steps.processor_image.outputs.should_build == 'true'
         run: |
           docker push "${{ steps.ecr.outputs.processor_image }}"
           docker push "${{ steps.ecr.outputs.processor_source_image }}"
@@ -225,18 +168,15 @@ jobs:
           docker push "${{ steps.ecr.outputs.url }}:latest"
 
       - name: Terraform plan
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: |
           terraform plan \
             -out=tfplan \
             -var "image_uri=${{ steps.processor_image.outputs.final_image }}"
 
       - name: Terraform apply
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: terraform apply -auto-approve tfplan
 
       - name: Read dashboard deployment outputs
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         id: dashboard
         run: |
           echo "bucket=$(terraform output -raw dashboard_bucket_name)" >> "$GITHUB_OUTPUT"
@@ -248,7 +188,6 @@ jobs:
           echo "dashboard_app_url=$(terraform output -raw dashboard_app_url)" >> "$GITHUB_OUTPUT"
 
       - name: Build dashboard for S3
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: |
           docker build \
             -f app/dashboard/Dockerfile \
@@ -264,18 +203,16 @@ jobs:
             app
 
       - name: Deploy dashboard to S3
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: |
           aws s3 sync dashboard-dist "s3://${{ steps.dashboard.outputs.bucket }}/" \
             --delete \
             --cache-control "no-cache, no-store, must-revalidate"
 
       - name: Bootstrap dashboard admin
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy') && env.BOOTSTRAP_EMAIL != ''
+        if: env.BOOTSTRAP_EMAIL != ''
         run: make bootstrap-auth
 
       - name: Write deployment summary
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.confirm == 'deploy')
         run: |
           {
             echo "## Deployment outputs"
