@@ -58,6 +58,7 @@ data "aws_iam_policy_document" "main" {
 
     actions = [
       "sqs:SendMessage",
+      "sqs:SendMessageBatch",
       "sqs:ReceiveMessage",
       "sqs:DeleteMessage",
       "sqs:GetQueueAttributes",

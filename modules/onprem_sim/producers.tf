@@ -88,8 +88,11 @@ resource "aws_instance" "producer" {
     batch_size        = var.producer_batch_size
     loop_interval_sec = var.producer_loop_interval_sec
     fraud_pct         = var.producer_fraud_pct
+    wait_script       = file("${path.module}/files/wait_for_sqs_dns.sh")
     producer_script   = file("${path.module}/files/tx_producer.py")
   })
+
+  user_data_replace_on_change = true
 
   tags = merge(local.module_tags, {
     Name  = format("%s-%s", local.name_prefix, each.key)
