@@ -10,10 +10,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.57.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.99.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.27
-	github.com/google/uuid v1.6.0
-	github.com/lib/pq v1.12.3
-	google.golang.org/grpc v1.63.2
-	google.golang.org/protobuf v1.34.1
 )
 
 require (
@@ -35,10 +31,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.19 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10 // indirect
 	github.com/aws/smithy-go v1.25.1 // indirect
-	golang.org/x/net v0.21.0 // indirect
-	golang.org/x/sys v0.17.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
 )
 
 replace github.com/FSendot/fraud-detector/net/serving/go => ../net/serving/go

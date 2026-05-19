@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - "app/processor/**"
-      - "app/api/**"
       - "app/dashboard/**"
       - "app/results_writer/**"
       - "app/net/serving/go/**"
@@ -22,7 +21,6 @@ on:
       - main
     paths:
       - "app/processor/**"
-      - "app/api/**"
       - "app/dashboard/**"
       - "app/results_writer/**"
       - "app/net/serving/go/**"
@@ -80,9 +78,6 @@ jobs:
 
           echo "key=${source_key}" >> "$GITHUB_OUTPUT"
           echo "tag=processor-src-${source_key}" >> "$GITHUB_OUTPUT"
-
-      - name: Build API image
-        run: docker build -f app/api/Dockerfile -t "fraud-api:${GITHUB_SHA}" app
 
       - name: Build processor image for validation
         if: github.ref != 'refs/heads/main'

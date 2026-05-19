@@ -11,10 +11,20 @@ import (
 )
 
 const (
-	defaultRegion     = "us-east-1"
-	envDynamoEndpoint = "DYNAMODB_ENDPOINT"
-	envAWSRegion      = "AWS_REGION"
+	defaultRegion      = "us-east-1"
+	defaultTableName   = "user_profiles"
+	envDynamoEndpoint  = "DYNAMODB_ENDPOINT"
+	envAWSRegion       = "AWS_REGION"
+	envDynamoTableName = "DYNAMODB_TABLE_NAME"
 )
+
+// TableName returns the DynamoDB table used for user profiles.
+func TableName() string {
+	if tableName := os.Getenv(envDynamoTableName); tableName != "" {
+		return tableName
+	}
+	return defaultTableName
+}
 
 func LoadAWSConfig(ctx context.Context) (aws.Config, error) {
 	endpoint := os.Getenv(envDynamoEndpoint)
