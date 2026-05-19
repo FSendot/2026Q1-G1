@@ -93,6 +93,72 @@ variable "sqs_vpc_endpoint_network_interface_ids" {
   }
 }
 
+variable "enable_traffic_producers" {
+  description = "Crea dos instancias EC2 en la VPC on-premise que envían transacciones sintéticas de forma continua a la cola SQS de ingesta."
+  type        = bool
+  default     = true
+}
+
+variable "ingestion_queue_url" {
+  description = "URL de la cola SQS de ingesta de transacciones consumida por los productores on-premise."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ingestion_queue_url == "" || can(regex("^https://sqs\\.", var.ingestion_queue_url))
+    error_message = "ingestion_queue_url debe ser una URL HTTPS de SQS o quedar vacía cuando enable_traffic_producers = false."
+  }
+
+  validation {
+    condition     = !var.enable_traffic_producers || var.ingestion_queue_url != ""
+    error_message = "ingestion_queue_url no puede estar vacía cuando enable_traffic_producers = true."
+  }
+}
+
+variable "producer_instance_type" {
+  description = "Tipo de instancia EC2 para los productores de tráfico on-premise simulado."
+  type        = string
+  default     = "t3a.micro"
+
+  validation {
+    condition     = contains(["t3a.micro", "t3a.small", "t3a.medium"], var.producer_instance_type)
+    error_message = "producer_instance_type debe ser uno de t3a.micro, t3a.small o t3a.medium."
+  }
+}
+
+variable "producer_batch_size" {
+  description = "Cantidad de mensajes que cada productor intenta enviar por iteración del loop continuo."
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.producer_batch_size >= 10 && var.producer_batch_size <= 1000
+    error_message = "producer_batch_size debe estar entre 10 y 1000."
+  }
+}
+
+variable "producer_loop_interval_sec" {
+  description = "Segundos de espera entre iteraciones de envío continuo por productor (~200 mensajes cada 6 s ≈ 2000 tx/min)."
+  type        = number
+  default     = 6
+
+  validation {
+    condition     = var.producer_loop_interval_sec >= 1 && var.producer_loop_interval_sec <= 60
+    error_message = "producer_loop_interval_sec debe estar entre 1 y 60 segundos."
+  }
+}
+
+variable "producer_fraud_pct" {
+  description = "Porcentaje de transacciones generadas con patrones de fraude por cada productor on-premise."
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.producer_fraud_pct >= 0 && var.producer_fraud_pct <= 100
+    error_message = "producer_fraud_pct debe estar entre 0 y 100."
+  }
+}
+
 variable "tags" {
   description = "Tags comunes a propagar a todos los recursos creados por el módulo (mergeados con tags específicos)."
   type        = map(string)

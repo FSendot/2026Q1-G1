@@ -198,3 +198,13 @@ output "vpn_connection_id" {
   description = "ID de la conexión Site-to-Site VPN entre el VGW y el Customer Gateway (null si enable_onprem_sim = false)."
   value       = try(module.onprem_sim[0].vpn_connection_id, null)
 }
+
+output "onprem_traffic_producer_instance_ids" {
+  description = "Mapa de IDs de instancia EC2 para los productores de tráfico on-premise simulado (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].traffic_producer_instance_ids, null)
+}
+
+output "onprem_traffic_producer_private_ips" {
+  description = "Mapa de IPs privadas de los productores de tráfico on-premise simulado (null si enable_onprem_sim = false)."
+  value       = try(module.onprem_sim[0].traffic_producer_private_ips, null)
+}

@@ -25,6 +25,10 @@ processor_pollers     = 4
 # lab footprint minimal between testing sessions.
 enable_onprem_sim = true
 
+# Set to false to skip the two on-prem EC2 traffic producers that continuously
+# enqueue synthetic transactions into the ingestion SQS queue over the VPN.
+enable_onprem_traffic_producers = true
+
 # Interval for the scheduled fraud summary email. Subscribed users receive one
 # SNS email per interval only when fraudulent transactions were queued.
 fraud_alert_summary_interval_minutes = 7

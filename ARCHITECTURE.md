@@ -37,13 +37,14 @@ Hard constraints driving the design:
 | ECS service (2 tasks, private subnets) | `modules/compute`  | custom    | `assign_public_ip = false`, `lifecycle { ignore_changes = [desired_count] }` so autoscaling owns capacity.       |
 | Application Auto Scaling on queue depth | `modules/compute` | custom    | Target tracking with metric math (`messages / max(running, 1)`), step scaling fallback on raw `Visible` metric. |
 | On-prem simulated VPC + CGW + Site-to-Site VPN | `modules/onprem_sim` | custom + embedded CFN | Public-only `192.168.0.0/16` VPC with one EC2 strongSwan router (deployed via `aws_cloudformation_stack` consuming `templates/vpn-gateway-strongswan.yml`). BGP-based `aws_vpn_connection` against the VGW. Gated by `var.enable_onprem_sim` (default `true`). |
+| On-prem traffic producers (2× EC2) | `modules/onprem_sim` | custom | Two `aws_instance` resources (`producer-1`, `producer-2`) run a `systemd` service that continuously sends synthetic transactions to the ingestion SQS queue over VPN (~2,000 tx/min each by default). Gated by `var.enable_onprem_traffic_producers` (default `true`). |
 | Private DNS for SQS from on-prem + queue lockdown | `modules/onprem_sim`, `modules/queue` | custom | Route 53 PHZ `sqs.<region>.amazonaws.com` associated only with the on-prem VPC (apex A record points at the SQS VPCE private IPs); static route `<aws-vpc-cidr> → strongSwan ENI` on the on-prem route table; SQS queue policy `Deny` on `sqs:SendMessage` unless `aws:VpcSourceIp` is inside the on-prem CIDR — only the on-prem site can publish. |
 
 ## 4. Data and control flow
 
 **Ingestion and scoring:**
 
-1. A producer (out of scope) calls `SendMessage` on the SQS main queue using the SQS Interface VPC Endpoint.
+1. Two dedicated on-prem EC2 producers (`producer-1`, `producer-2`) call `SendMessageBatch` on the SQS main queue using the SQS Interface VPC Endpoint over the VPN. Each runs a `systemd` unit that loops indefinitely (~200 messages every 6 seconds by default). The strongSwan router only terminates IPsec; `scripts/send_test_transactions.py` remains available for optional burst tests via SSM.
 2. Fargate tasks consume from the queue, look up the user's behaviour features in DynamoDB via the DynamoDB Gateway Endpoint, run the scoring model, and send every result to the results SQS queue.
 3. Failures on the ingestion queue are retried via SQS visibility timeout. After `maxReceiveCount = 5` deliveries, the message moves to the ingestion DLQ.
 4. CloudWatch Logs receives container logs through the Logs Interface Endpoint.
@@ -67,7 +68,7 @@ From the on-prem side, the SQS hostname `sqs.<region>.amazonaws.com` resolves pr
 - **No NAT Gateway** — saves cost and forces all egress through VPC endpoints.
 - **No customer-managed KMS keys** — AWS Academy disallows KMS CMK creation. AWS-owned/managed keys are used everywhere (S3 SSE-S3, DynamoDB SSE-AWS, SQS SSE-SQS, ECR AES256). Checkov findings for this are documented and skipped on the affected resources.
 - **`LabRole` as both task and execution role** — AWS Academy disallows creating new roles. Documented `CKV_AWS_249` skip on `aws_ecs_task_definition`.
-- **On-prem simulation is BGP-only and single-AZ.** `modules/onprem_sim` is intentionally minimal (one public subnet, permissive SG, one EC2 router). It can be disabled with `var.enable_onprem_sim = false` to skip both the VPN connection costs and the strongSwan stack rollout.
+- **On-prem simulation is BGP-only and single-AZ.** `modules/onprem_sim` is intentionally minimal (one public subnet, permissive SG, one EC2 router plus two traffic producers). It can be disabled with `var.enable_onprem_sim = false` to skip both the VPN connection costs and the strongSwan stack rollout. Disable only the producers with `var.enable_onprem_traffic_producers = false`.
 - **No VPC Flow Logs** — intentionally skipped for the lab footprint. Re-enable later when the Checkov `CKV2_AWS_11` finding becomes a hard requirement.
 - **Container image ownership.** The processor image is built in GitHub Actions, tagged with the commit SHA, pushed to ECR on `main`, and passed back into Terraform as `image_uri`; it is owned by the Fargate service in `modules/compute`. The API Dockerfile is built for CI/local validation only and is not pushed to ECR because the dashboard API runs as Lambda. The dashboard Dockerfile builds a static export instead of an ECR image; CI syncs that export to the S3 website bucket created by Terraform.
 - **S3 backend with partial config.** `backend.tf` uses partial configuration; the bucket name (`itba-tp-fraud-tfstate-<account-id>`) is supplied at `terraform init` time via `-backend-config` in `make init`. DynamoDB locking is not used in the lab.
