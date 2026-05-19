@@ -8,7 +8,6 @@ RUN go mod download
 
 COPY processor/cmd ./cmd
 COPY processor/internal ./internal
-COPY processor/proto ./proto
 RUN CGO_ENABLED=0 go build -o /fraud-worker ./cmd/worker
 
 FROM alpine:3.21
