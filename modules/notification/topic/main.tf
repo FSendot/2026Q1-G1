@@ -4,6 +4,24 @@ locals {
   })
 
   topic_name = format("%s-fraud-summaries", var.project)
+
+  summary_notification_actions = [
+    "sns:GetTopicAttributes",
+    "sns:ListSubscriptionsByTopic",
+    "sns:Publish",
+    "sns:Subscribe",
+  ]
+
+  topic_scoped_actions = [
+    "sns:AddPermission",
+    "sns:DeleteTopic",
+    "sns:GetTopicAttributes",
+    "sns:ListSubscriptionsByTopic",
+    "sns:Publish",
+    "sns:RemovePermission",
+    "sns:SetTopicAttributes",
+    "sns:Subscribe",
+  ]
 }
 
 resource "aws_sns_topic" "summary" {
@@ -25,13 +43,7 @@ data "aws_iam_policy_document" "summary" {
       identifiers = [var.principal_arn]
     }
 
-    actions = [
-      "sns:GetTopicAttributes",
-      "sns:ListSubscriptionsByTopic",
-      "sns:Publish",
-      "sns:Subscribe",
-      "sns:Unsubscribe",
-    ]
+    actions   = local.summary_notification_actions
     resources = [aws_sns_topic.summary.arn]
   }
 
@@ -44,7 +56,7 @@ data "aws_iam_policy_document" "summary" {
       identifiers = ["*"]
     }
 
-    actions   = ["sns:*"]
+    actions   = local.topic_scoped_actions
     resources = [aws_sns_topic.summary.arn]
 
     condition {
