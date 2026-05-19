@@ -137,18 +137,20 @@ module "notification" {
 module "results_writer" {
   source = "./modules/results_writer"
 
-  project                    = local.project
-  principal_arn              = data.aws_iam_role.lab.arn
-  vpc_id                     = module.network.vpc_id
-  private_subnet_ids         = module.network.private_subnet_ids
-  endpoint_security_group_id = module.network.endpoint_security_group_id
-  psycopg2_layer_arn         = aws_lambda_layer_version.psycopg2.arn
-  db_host                    = module.data_store.proxy_endpoint
-  db_port                    = module.data_store.db_port
-  db_name                    = module.data_store.db_name
-  db_username                = module.data_store.db_username
-  db_password                = random_password.db.result
-  tags                       = local.common_tags
+  project                     = local.project
+  principal_arn               = data.aws_iam_role.lab.arn
+  vpc_id                      = module.network.vpc_id
+  private_subnet_ids          = module.network.private_subnet_ids
+  endpoint_security_group_id  = module.network.endpoint_security_group_id
+  db_host                     = module.data_store.proxy_endpoint
+  db_port                     = module.data_store.db_port
+  db_name                     = module.data_store.db_name
+  db_username                 = module.data_store.db_username
+  db_password                 = random_password.db.result
+  package_file                = "${path.root}/app/results_writer/build/results-writer.zip"
+  sqs_batch_size              = var.results_writer_batch_size
+  sqs_batching_window_seconds = var.results_writer_batching_window_seconds
+  tags                        = local.common_tags
 }
 
 module "auth" {

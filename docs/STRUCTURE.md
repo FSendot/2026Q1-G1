@@ -43,6 +43,7 @@
 │       └── README.md
 ├── app/
 │   ├── processor/        # Fraud worker container deployed to ECS Fargate
+│   ├── results_writer/   # Go custom-runtime Lambda that drains result SQS batches into RDS
 │   ├── notification/     # Fraud-summary Lambda application code packaged by Terraform
 │   ├── api/              # Dashboard API source + Docker build check; Terraform deploys Lambda zip
 │   ├── dashboard/        # Static frontend export deployed to the dashboard S3 bucket

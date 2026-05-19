@@ -1,6 +1,9 @@
 PSYCOPG2_VERSION := 2.9.10
 PSYCOPG2_ZIP     := layers/psycopg2/psycopg2-layer.zip
 
+RESULTS_WRITER_DIR := app/results_writer
+RESULTS_WRITER_ZIP := $(RESULTS_WRITER_DIR)/build/results-writer.zip
+
 MODEL_PREP_SOURCE := app/net/outputs/go_runtime/model_v1/runtime_spec.json
 MODEL_PREP_DEST := app/processor/model/runtime_spec.json
 MODEL_PREP_FALLBACK_FILE_URL := https://drive.google.com/file/d/1Gut3LFjfYVpIEHJIXkzztcfZ6o-CRAwX/view?usp=sharing
@@ -23,7 +26,7 @@ BOOTSTRAP_ALERT_EMAIL      ?=
 BOOTSTRAP_PASSWORD         ?=
 BOOTSTRAP_DISPLAY_NAME     ?= Bootstrap Admin
 
-.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers prepare-model model-prep seed bootstrap-auth send-test-tx logs
+.PHONY: help fmt fmt-check validate lint init plan apply destroy clean build-layers build-results-writer prepare-model model-prep seed bootstrap-auth send-test-tx logs
 
 help:
 	@echo "Targets:"
@@ -32,6 +35,7 @@ help:
 	@echo "  make validate         Validate all Terraform files"
 	@echo "  make lint             Run checkov (Terraform)"
 	@echo "  make build-layers     Build psycopg2 Lambda layer (required before first plan)"
+	@echo "  make build-results-writer Build the Go results-writer Lambda package"
 	@echo "  make prepare-model    Prepare app/processor/model/runtime_spec.json for container builds"
 	@echo "  make init             Initialize the working directory"
 	@echo "  make plan             Plan (writes tfplan)"
@@ -49,7 +53,7 @@ fmt:
 fmt-check:
 	terraform fmt -check -recursive
 
-validate:
+validate: $(PSYCOPG2_ZIP) build-results-writer
 	@for d in $$(find . -type f -name '*.tf' -not -path '*/.*' -exec dirname {} \; | sort -u); do \
 		echo "==> $$d"; \
 		(cd $$d && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; \
@@ -74,6 +78,13 @@ $(PSYCOPG2_ZIP):
 
 build-layers: $(PSYCOPG2_ZIP)
 
+build-results-writer:
+	@echo "Building results-writer Lambda..."
+	@mkdir -p $(RESULTS_WRITER_DIR)/build
+	@cd $(RESULTS_WRITER_DIR) && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o build/bootstrap ./cmd/bootstrap
+	@cd $(RESULTS_WRITER_DIR)/build && zip -q -j results-writer.zip bootstrap
+	@echo "Lambda package ready: $(RESULTS_WRITER_ZIP)"
+
 init:
 	ACCOUNT_ID=$$(aws sts get-caller-identity --query Account --output text) && \
 	BUCKET="itba-tp-fraud-tfstate-$${ACCOUNT_ID}" && \
@@ -84,7 +95,7 @@ init:
 	  --versioning-configuration Status=Enabled && \
 	terraform init -migrate-state -force-copy -backend-config="bucket=$${BUCKET}"
 
-plan: $(PSYCOPG2_ZIP)
+plan: $(PSYCOPG2_ZIP) build-results-writer
 	TF_VAR_google_oauth_client_id="$(GOOGLE_OAUTH_CLIENT_ID)" \
 	TF_VAR_google_oauth_client_secret="$(GOOGLE_OAUTH_CLIENT_SECRET)" \
 	terraform plan -out=tfplan

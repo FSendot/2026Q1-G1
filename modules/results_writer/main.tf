@@ -1,5 +1,3 @@
-data "aws_region" "current" {}
-
 locals {
   module_tags = merge(var.tags, {
     Component = "results-writer"
@@ -35,8 +33,8 @@ resource "aws_sqs_queue_redrive_allow_policy" "results_dlq" {
 resource "aws_sqs_queue" "results" {
   name = local.queue_name
 
-  # Visibility timeout >= 6× Lambda timeout (Lambda timeout = 30s)
-  visibility_timeout_seconds = 180
+  # Visibility timeout >= 6× Lambda timeout (Lambda timeout = 60s).
+  visibility_timeout_seconds = 360
   message_retention_seconds  = 345600
   sqs_managed_sse_enabled    = true
 
@@ -130,12 +128,6 @@ resource "aws_vpc_security_group_egress_rule" "writer_to_endpoints" {
   tags = local.module_tags
 }
 
-data "archive_file" "writer_handler" {
-  type        = "zip"
-  output_path = "${path.module}/handler.zip"
-  source_file = "${path.module}/handler.py"
-}
-
 resource "aws_lambda_function" "writer" {
   # checkov:skip=CKV_AWS_272: Code signing no configurado en lab académico.
   # checkov:skip=CKV_AWS_50: X-Ray tracing deshabilitado en lab.
@@ -143,14 +135,14 @@ resource "aws_lambda_function" "writer" {
   # checkov:skip=CKV_AWS_117: Lambda desplegada en VPC para acceder a RDS en subnets privadas.
   function_name = local.function_name
   role          = var.principal_arn
-  runtime       = "python3.12"
-  handler       = "handler.handler"
-  timeout       = 30
-  memory_size   = 256
-  layers        = [var.psycopg2_layer_arn]
+  runtime       = "provided.al2023"
+  handler       = "bootstrap"
+  timeout       = 60
+  memory_size   = 1024
+  architectures = ["x86_64"]
 
-  filename         = data.archive_file.writer_handler.output_path
-  source_code_hash = data.archive_file.writer_handler.output_base64sha256
+  filename         = var.package_file
+  source_code_hash = filebase64sha256(var.package_file)
 
   vpc_config {
     subnet_ids         = var.private_subnet_ids
@@ -177,7 +169,7 @@ resource "aws_lambda_function" "writer" {
 resource "aws_lambda_event_source_mapping" "sqs_results" {
   event_source_arn                   = aws_sqs_queue.results.arn
   function_name                      = aws_lambda_function.writer.arn
-  batch_size                         = 10
-  maximum_batching_window_in_seconds = 30
+  batch_size                         = var.sqs_batch_size
+  maximum_batching_window_in_seconds = var.sqs_batching_window_seconds
   enabled                            = true
 }

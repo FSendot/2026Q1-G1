@@ -44,11 +44,6 @@ variable "endpoint_security_group_id" {
   type        = string
 }
 
-variable "psycopg2_layer_arn" {
-  description = "ARN del Lambda layer con psycopg2 compilado para Amazon Linux 2023 (Python 3.12)."
-  type        = string
-}
-
 variable "db_host" {
   description = "Hostname del endpoint RDS (DB_HOST en la Lambda)."
   type        = string
@@ -76,6 +71,33 @@ variable "db_password" {
   description = "Contraseña del usuario master de la base de datos."
   type        = string
   sensitive   = true
+}
+
+variable "package_file" {
+  description = "Ruta local del paquete zip de la Lambda results-writer. La composición raíz lo construye desde app/results_writer."
+  type        = string
+}
+
+variable "sqs_batch_size" {
+  description = "Tamaño máximo del lote SQS para la Lambda writer. AWS SQS standard queues allow up to 10,000 records por lote."
+  type        = number
+  default     = 5000
+
+  validation {
+    condition     = var.sqs_batch_size >= 1 && var.sqs_batch_size <= 10000
+    error_message = "sqs_batch_size debe estar entre 1 y 10000."
+  }
+}
+
+variable "sqs_batching_window_seconds" {
+  description = "Ventana de batching en segundos para el event source mapping de SQS."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.sqs_batching_window_seconds >= 0 && var.sqs_batching_window_seconds <= 300 && (var.sqs_batch_size <= 10 || var.sqs_batching_window_seconds >= 1)
+    error_message = "sqs_batching_window_seconds debe estar entre 0 y 300; si sqs_batch_size es mayor que 10, la ventana debe ser de al menos 1 segundo."
+  }
 }
 
 variable "log_retention_days" {

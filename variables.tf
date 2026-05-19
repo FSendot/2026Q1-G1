@@ -81,6 +81,28 @@ variable "processor_pollers" {
   }
 }
 
+variable "results_writer_batch_size" {
+  description = "Cantidad máxima de mensajes SQS que cada invocación de la Lambda results-writer recibe para insertar en bloque en RDS."
+  type        = number
+  default     = 5000
+
+  validation {
+    condition     = var.results_writer_batch_size >= 1 && var.results_writer_batch_size <= 10000
+    error_message = "results_writer_batch_size debe estar entre 1 y 10000 para event source mappings SQS estándar."
+  }
+}
+
+variable "results_writer_batching_window_seconds" {
+  description = "Segundos máximos que Lambda espera para acumular mensajes antes de invocar results-writer."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.results_writer_batching_window_seconds >= 1 && var.results_writer_batching_window_seconds <= 300
+    error_message = "results_writer_batching_window_seconds debe estar entre 1 y 300 segundos; batch sizes mayores a 10 requieren al menos 1 segundo."
+  }
+}
+
 variable "enable_onprem_sim" {
   description = "Habilita la VPC simulada de on-premise con su EC2 strongSwan, Customer Gateway, conexión Site-to-Site VPN contra el VGW, la Private Hosted Zone para SQS y el lockdown de la cola al CIDR on-premise."
   type        = bool
