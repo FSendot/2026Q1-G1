@@ -5,58 +5,6 @@ Transacciones financieras ingresan desde un sitio on-premise simulado, son proce
 
 La arquitectura detallada está en [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
----
-
-## Arquitectura
-
-```
-On-Prem VPC 192.168.0.0/16              AWS VPC 10.0.0.0/16 — solo subnets privadas
-┌──────────────────────┐                ┌────────────────────────────────────────┐
-│    EC2 strongSwan    │                │                                        │
-│  (router IPsec/BGP)  │═══════VPN══════╪══▶ VGW                                 │
-└──────────────────────┘  2 túneles     │                                        │
-          │                             │  ┌──────────────────────┐              │
-          │ SQS sobre VPN               │  │ ECS Fargate (2 tasks)│              │
-          └────────────────────────────▶│  │    scoring engine    │◀── ECR image │
-                                        │  └──────────┬───────────┘              │
-                                        │             │ Send result to SQS       │
-                                        │             │ Send fraud to alerts SQS │
-                                        │             ▼                          │
-                                        │  ┌───────────────────────┐             │
-                                        │  │   SQS Queue results   │             │
-                                        │  └──────────┬────────────┘             │
-                                        │             │ Send message to Lambda   │
-                                        │             ▼                          │
-                                        │  ┌───────────────────────┐             │
-                                        │  │ Lambda results-writer │             │
-                                        │  └──────────┬────────────┘             │
-                                        │             │ Write message to RDS     │
-                                        │             ▼                          │
-                                        │  ┌──────────────────────┐              │
-                                        │  │      RDS Proxy       │              │
-                                        │  └──────────┬───────────┘              │
-                                        │             │ Query RDS                │
-                                        │             ▼                          │
-                                        │  ┌──────────────────────┐              │
-                                        │  │    RDS PostgreSQL    │              │
-                                        │  │    (fraud_results)   │              │
-                                        │  └──────────┬───────────┘              │
-                                        │             │ Serve API                │
-                                        │  ┌──────────┴───────────┐              │
-                                        │  │     Lambda API       │              │
-                                        │  └──────────┬───────────┘              │
-                                        │             │                          │
-                                        └─────────────┴──────────────────────────┘
-                                                      │
-                                           ┌──────────┴──────────┐
-                                           │   API Gateway HTTP  │
-                                           └──────────┬──────────┘
-                                                      │
-                                           ┌──────────┴──────────┐
-                                           │    S3 Dashboard     │
-                                           │  (sitio estático)   │
-                                           └─────────────────────┘
-```
 
 **Flujo de datos:**
 
