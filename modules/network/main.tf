@@ -86,7 +86,7 @@ check "cognito_idp_subnet_coverage" {
 
 resource "aws_security_group" "endpoints" {
   name        = format("%s-endpoints-sg", var.project)
-  description = "SG para los Interface VPC Endpoints; permite HTTPS desde las subnets de aplicación y CIDRs adicionales autorizados."
+  description = "Interface VPC endpoints SG; allows HTTPS from app subnets and authorized additional CIDRs."
   vpc_id      = module.vpc.vpc_id
 
   tags = merge(local.module_tags, {
@@ -98,7 +98,7 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_https_from_app_subnet"
   for_each = toset(local.app_subnet_cidrs)
 
   security_group_id = aws_security_group.endpoints.id
-  description       = "HTTPS desde subnets de aplicación"
+  description       = "HTTPS from app subnets"
   cidr_ipv4         = each.value
   ip_protocol       = "tcp"
   from_port         = 443
@@ -111,7 +111,7 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_https_from_additional_
   for_each = toset(var.additional_endpoint_client_cidrs)
 
   security_group_id = aws_security_group.endpoints.id
-  description       = "HTTPS desde CIDR adicional autorizado"
+  description       = "HTTPS from authorized additional CIDR"
   cidr_ipv4         = each.value
   ip_protocol       = "tcp"
   from_port         = 443
@@ -124,7 +124,7 @@ resource "aws_vpc_security_group_egress_rule" "endpoints_to_app_subnet" {
   for_each = toset(local.app_subnet_cidrs)
 
   security_group_id = aws_security_group.endpoints.id
-  description       = "Respuestas hacia subnets de aplicación"
+  description       = "Return traffic to app subnets"
   cidr_ipv4         = each.value
   ip_protocol       = "-1"
 
@@ -135,7 +135,7 @@ resource "aws_vpc_security_group_egress_rule" "endpoints_to_additional_cidr" {
   for_each = toset(var.additional_endpoint_client_cidrs)
 
   security_group_id = aws_security_group.endpoints.id
-  description       = "Respuestas hacia CIDR adicional autorizado"
+  description       = "Return traffic to authorized additional CIDR"
   cidr_ipv4         = each.value
   ip_protocol       = "-1"
 
