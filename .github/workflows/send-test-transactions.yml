@@ -4,33 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: Number of transactions to enqueue.
+        description: Cantidad de transacciones a generar y encolar en el pico.
         required: true
         default: "50000"
       fraud_pct:
-        description: Percentage of transactions using the fraud pattern.
+        description: Porcentaje de transacciones con patrón de fraude (0–100).
         required: true
         default: "8"
       concurrency:
-        description: Concurrent SQS batch sender workers on the on-prem EC2.
+        description: Workers paralelos en el EC2 on-prem que envían lotes a SQS.
         required: true
         default: "128"
-      region:
-        description: AWS region.
-        required: true
-        default: us-east-1
-      stack:
-        description: CloudFormation stack name for the on-prem EC2 instance.
-        required: true
-        default: itba-tp-fraud-onprem-strongswan
-      queue_url:
-        description: Optional SQS queue URL override. Leave empty to read terraform output.
-        required: false
-        default: ""
-      instance_id:
-        description: Optional EC2 instance ID override. Leave empty to read CloudFormation output.
-        required: false
-        default: ""
 
 jobs:
   send-test-transactions:
@@ -45,7 +29,8 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
-      AWS_DEFAULT_REGION: ${{ inputs.region }}
+      AWS_DEFAULT_REGION: us-east-1
+      ONPREM_STACK: itba-tp-fraud-onprem-strongswan
 
     steps:
       - name: Checkout
@@ -65,28 +50,13 @@ jobs:
           terraform_wrapper: false
 
       - name: Initialize Terraform
-        if: ${{ inputs.queue_url == '' }}
         run: make init
 
       - name: Send transactions
-        shell: bash
         run: |
-          set -euo pipefail
-
-          args=(
-            --stack "${{ inputs.stack }}"
-            --region "${{ inputs.region }}"
-            --count "${{ inputs.count }}"
-            --fraud-pct "${{ inputs.fraud_pct }}"
+          python scripts/send_test_transactions.py \
+            --stack "${ONPREM_STACK}" \
+            --region "${AWS_DEFAULT_REGION}" \
+            --count "${{ inputs.count }}" \
+            --fraud-pct "${{ inputs.fraud_pct }}" \
             --concurrency "${{ inputs.concurrency }}"
-          )
-
-          if [ -n "${{ inputs.queue_url }}" ]; then
-            args+=(--queue-url "${{ inputs.queue_url }}")
-          fi
-
-          if [ -n "${{ inputs.instance_id }}" ]; then
-            args+=(--instance-id "${{ inputs.instance_id }}")
-          fi
-
-          python scripts/send_test_transactions.py "${args[@]}"

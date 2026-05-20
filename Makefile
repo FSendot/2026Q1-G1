@@ -22,7 +22,6 @@ PYTHON        ?= $(shell which python3)
 GOOGLE_OAUTH_CLIENT_ID     ?=
 GOOGLE_OAUTH_CLIENT_SECRET ?=
 BOOTSTRAP_EMAIL            ?=
-BOOTSTRAP_ALERT_EMAIL      ?=
 BOOTSTRAP_PASSWORD         ?=
 BOOTSTRAP_DISPLAY_NAME     ?= Bootstrap Admin
 
@@ -180,7 +179,7 @@ bootstrap-auth:
 	  --email "$(BOOTSTRAP_EMAIL)" \
 	  --password "$(BOOTSTRAP_PASSWORD)" \
 	  --display-name "$(BOOTSTRAP_DISPLAY_NAME)" \
-	  --alert-email "$(if $(BOOTSTRAP_ALERT_EMAIL),$(BOOTSTRAP_ALERT_EMAIL),$(BOOTSTRAP_EMAIL))" \
+	  --alert-email "$(BOOTSTRAP_EMAIL)" \
 	  --region "$(REGION)"
 
 send-test-tx:

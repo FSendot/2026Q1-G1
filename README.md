@@ -7,112 +7,125 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 **Flujo de datos:**
 
-1. Dos instancias EC2 on-prem (`producer-1`, `producer-2`) envían transacciones JSON al SQS de ingesta de forma continua (~2.000 tx/min cada una) a través del túnel VPN; opcionalmente podés lanzar picos manuales con `scripts/send_test_transactions.py`.
-2. Fargate consume el mensaje, consulta el perfil del usuario en DynamoDB y calcula el fraud score
-3. El resultado se envía directo al SQS de resultados; si es fraude, también se encola en el SQS de alertas
-4. La Lambda `results-writer` toma el mensaje de resultados de SQS y persiste el resultado en RDS vía RDS Proxy
-5. La Lambda `fraud-summary` se ejecuta cada `fraud_alert_summary_interval_minutes`, resume los fraudes pendientes y publica un único email vía SNS
-6. La Lambda `api` expone esos datos a través de API Gateway
-7. El dashboard (S3 website) consume la API y muestra el estado en tiempo real
+1. Dos instancias EC2 on-prem (`producer-1`, `producer-2`) envían transacciones JSON al SQS de ingesta de forma continua (~50 tx/min en total) a través del túnel VPN; para picos adicionales, usar el workflow **Send test transactions**.
+2. Fargate consume el mensaje, consulta el perfil del usuario en DynamoDB y calcula el fraud score.
+3. El resultado se envía al SQS de resultados; si es fraude, también se encola en el SQS de alertas.
+4. La Lambda `results-writer` persiste el resultado en RDS vía RDS Proxy.
+5. La Lambda `fraud-summary` se ejecuta cada un intervalo de tiempo configurable, resume los fraudes pendientes y publica un email vía SNS.
+6. La Lambda `api` expone esos datos a través de API Gateway.
+7. El dashboard (S3) consume la API y muestra el estado en tiempo real.
+
+Toda la operación del lab (deploy, pruebas, destrucción) se hace desde **GitHub Actions**.
 
 ---
 
-## Deploy con GitHub Actions
+## GitHub Actions
 
-**GitHub Actions es el camino recomendado** para desplegar y destruir la infraestructura del lab. Solo **Validate** corre automáticamente en cada push/PR; **Deploy** y el resto se lanzan manualmente desde la pestaña Actions.
+Los workflows se lanzan manualmente en la pestaña **Actions** del repositorio. Algunos de ellos requieren una confirmación para ejecutar el workflow.
+
+
+| Workflow                   | Confirmación / inputs                                                                                                                                                         | Qué hace                                                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Validate**               | —                                                                                                                                                                             | `terraform fmt -check`, `terraform validate`, build de artefactos Lambda necesarios para validar. No toca AWS.                                                             |
+| **Plan**                   | Escribir `plan`                                                                                                                                                               | `terraform plan` contra el state remoto; sube el artefacto `plan_output.txt`.                                                                                              |
+| **Deploy**                 | Escribir `deploy`                                                                                                                                                             | Deploy completo: processor en ECR, `terraform apply`, dashboard en S3, bootstrap de admin si hay `BOOTSTRAP_EMAIL`.                                                        |
+| **Destroy**                | Escribir `destroy`                                                                                                                                                            | `terraform destroy` de toda la infra gestionada.                                                                                                                           |
+| **Send test transactions** | `count` (Número de transacciones), `fraud_pct` (Porcentaje de transacciones con patrón de fraude), `concurrency` (Workers paralelos en el EC2 on-prem que envían lotes a SQS) | Ejecuta en el EC2 on-prem (vía SSM) un generador que encola un pico en el SQS de ingesta (cola e instancia se resuelven solas desde Terraform y el stack on-prem del lab). |
+
 
 ### 1. Configurar secrets
 
-En **Settings → Secrets and variables → Actions**:
+Dentro de Github, en el repositorio, en **Settings → Secrets and variables → Actions**, crear los siguientes secrets:
 
 
-| Secret                       | Obligatorio | Para qué                                              |
-| ---------------------------- | ----------- | ----------------------------------------------------- |
-| `AWS_ACCESS_KEY_ID`          | Sí          | Credenciales temporales del lab AWS Academy           |
-| `AWS_SECRET_ACCESS_KEY`      | Sí          | (mismo set; expiran ~cada 4 h)                        |
-| `AWS_SESSION_TOKEN`          | Sí          |                                                       |
-| `BOOTSTRAP_EMAIL`            | Recomendado | Primer admin del dashboard en RDS                     |
-| `BOOTSTRAP_PASSWORD`         | Opcional    | Login directo en Cognito (requiere `BOOTSTRAP_EMAIL`) |
-| `BOOTSTRAP_ALERT_EMAIL`      | Opcional    | Email suscrito al SNS de resúmenes de fraude          |
-| `GOOGLE_OAUTH_CLIENT_ID`     | Opcional    | Login con Google (requiere también el secret)         |
-| `GOOGLE_OAUTH_CLIENT_SECRET` | Opcional    | Par con `GOOGLE_OAUTH_CLIENT_ID`                      |
+| Secret                  | Obligatorio | Para qué                                                            |
+| ----------------------- | ----------- | ------------------------------------------------------------------- |
+| `AWS_ACCESS_KEY_ID`     | Sí          | Access Key del lab AWS Academy.                                     |
+| `AWS_SECRET_ACCESS_KEY` | Sí          | Secret Access Key del lab AWS Academy.                              |
+| `AWS_SESSION_TOKEN`     | Sí          | Session Token del lab AWS Academy.                                  |
+| `BOOTSTRAP_EMAIL`       | Sí          | Email del primer administrador del dashboard.                       |
+| `BOOTSTRAP_PASSWORD`    | Sí          | Contraseña en Cognito para `BOOTSTRAP_EMAIL`. Ver requisitos abajo. |
+|                         |             |                                                                     |
+|                         |             |                                                                     |
 
 
-Los workflows **no leen `terraform.tfvars`**. Los defaults del lab están en la composición raíz y en `[terraform.tfvars.example](terraform.tfvars.example)`.
+**Requisitos de `BOOTSTRAP_PASSWORD`**:
 
-Cuando el lab expira, actualizar los tres secrets AWS antes de relanzar cualquier workflow.
+
+| Regla           | Valor                  |
+| --------------- | ---------------------- |
+| Longitud mínima | 12 caracteres          |
+| Mayúsculas      | Al menos una (`A`–`Z`) |
+| Minúsculas      | Al menos una (`a`–`z`) |
+| Números         | Al menos uno (`0`–`9`) |
+| Símbolos        | No obligatorios        |
+
+
+**Valor recomendado** (cumple todas las reglas): `ItbaFraudLab2026!`
 
 ### 2. Desplegar
 
-1. Integrar el código en `main` (push/PR solo dispara **Validate**; no crea recursos en AWS).
-2. (Opcional) **Actions → Plan** → Run workflow → escribir `plan` → revisar el artefacto `plan_output.txt`.
-3. **Actions → Deploy** → Run workflow → rama `main` → escribir `deploy`.
-4. Esperar el run verde.
-5. Abrir esa URL en el navegador:
-   - En el **job summary** del run de **Deploy** (*Deployment outputs* → `dashboard_url`), o
-   - **Actions → Dashboard URL** → Run workflow → en el job summary aparece solo la URL (también en el log del paso *Print dashboard URL*).
+1. (Opcional) **Actions → Plan** → Run workflow → escribir `plan` → esto genera el plan de ejecución de Terraform. Es opcional porque **Deploy** lo ejecuta automáticamente.
+2. **Actions → Deploy** → Run workflow → rama `main` → escribir `deploy`.
+3. Esperar el run en verde.
+4. Abrir el dashboard desde el **job summary** del run (*Deployment outputs* → `dashboard_url`).
 
-Un push o merge a `main` **no** despliega nada; hay que lanzar **Deploy** a mano.
+**Deploy** ejecuta, en orden: preparación del modelo, build y push de la imagen del processor a ECR, `terraform apply`, publicación del dashboard en S3 y, si `BOOTSTRAP_EMAIL` está configurado, bootstrap automático del administrador (con `BOOTSTRAP_PASSWORD` si fue definido).
 
-**Deploy** ejecuta: build de imagen del processor → `terraform apply` → sync del dashboard a S3 → bootstrap automático si existe `BOOTSTRAP_EMAIL`.
+### 3. Primer acceso al dashboard
 
-Para cambios solo de infra sin rebuild de apps, existe **Terraform Apply** (confirmación `apply`). No usarlo en el primer deploy ni después de un **Deploy** exitoso (puede dejar ECS en `:placeholder`).
+Tras un **Deploy** exitoso, usar la URL HTTPS del job summary (`dashboard_url`). No usar el endpoint HTTP del website estático de S3: el flujo Cognito PKCE requiere HTTPS.
 
-### 3. Bootstrap (si no configuraste secrets de admin)
 
-Si **no** definiste `BOOTSTRAP_EMAIL` (y opcionalmente `BOOTSTRAP_PASSWORD`), el deploy termina bien pero nadie puede administrar el dashboard hasta crear el primer admin:
+| Paso                     | Acción                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| Iniciar sesión           | Cognito Hosted UI con el email de `BOOTSTRAP_EMAIL`.                                              |
+| Con `BOOTSTRAP_PASSWORD` | Login directo con la contraseña del secret.                                                       |
+| Sin `BOOTSTRAP_PASSWORD` | Completar el registro en Cognito con el mismo email; el bootstrap ya creó el acceso admin en RDS. |
+| Sin `BOOTSTRAP_EMAIL`    | Agregar el secret y volver a ejecutar **Deploy**.                                                 |
 
-```bash
-make init   # credenciales AWS del lab en el entorno
-make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com
+
+- **Transaction User**: `user_id` de las transacciones financieras.
+- **Dashboard User**: persona autenticada en Cognito.
+
+Cognito autentica; RDS autoriza vía `dashboard_access`. El admin bootstrap invita emails desde la pestaña **Invitaciones**; el invitado debe registrarse en Cognito con el mismo email.
+
+Para Google OAuth, registrar en Google Cloud el redirect URI:
+
+```text
+https://itba-fraud-auth-<account-id>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
 ```
 
-Con contraseña fija en Cognito:
+### 4. Probar el flujo
 
-```bash
-make bootstrap-auth BOOTSTRAP_EMAIL=tu-email@example.com BOOTSTRAP_PASSWORD='UnaPasswordDemo123!'
-```
 
-Sin `BOOTSTRAP_PASSWORD`, el script solo crea el acceso admin en RDS; el usuario debe registrarse en Cognito Hosted UI con el mismo email.
+| Paso                           | Workflow                                                                                                   |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Enviar transacciones de prueba | **Send test transactions** (infra desplegada; simulación on-prem habilitada por defecto en la composición) |
+| Ver el dashboard               | `dashboard_url` en el job summary de **Deploy**                                                            |
+| Tráfico continuo on-prem       | Automático: 2 productores EC2 (~50 tx/min total, ~8 % patrón de fraude)                                    |
+| Resúmenes por email            | Cada `fraud_alert_summary_interval_minutes` (default 7); hasta 500 alertas por envío                       |
 
-### 4. Destruir al terminar el lab
+
+**Send test transactions** — inputs del workflow:
+
+
+| Input         | Default | Para qué se usa                                                                                                                 |
+| ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `count`       | `50000` | Total de transacciones sintéticas que el generador intenta encolar en SQS durante el pico.                                      |
+| `fraud_pct`   | `8`     | Porcentaje de esas transacciones generadas con patrón de fraude (el resto son normales).                                        |
+| `concurrency` | `128`   | Cantidad de workers paralelos en el EC2 que envían lotes a SQS; más valor = pico más rápido (más carga en el EC2 y en la cola). |
+
+
+Región (`us-east-1`), cola de ingesta (`terraform output queue_url`) e instancia on-prem (`VpnGatewayInstanceId` del stack `itba-tp-fraud-onprem-strongswan`) están fijados por el lab y no se exponen como inputs del workflow.
+
+Patrones generados: transacciones **normales** (usuarios recurrentes, montos bajos/medios) y **fraude** (account drain, country shift, card testing, etc.).
+
+### 5. Destruir al terminar el lab
 
 **Actions → Destroy** → Run workflow → escribir `destroy`.
 
-El bucket de state S3 `itba-tp-fraud-tfstate-<account-id>` no se elimina con Destroy.
-
----
-
-## Probar el flujo completo
-
-
-| Paso                             | Cómo                                                                                                |
-| -------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 1. Enviar transacciones          | **Actions → Send test transactions** (requiere infra desplegada y `enable_onprem_sim = true`)       |
-| 2. Ver el dashboard              | Abrir `dashboard_url` del job summary de **Deploy**                                                 |
-| 3. Iniciar sesión                | Cognito Hosted UI; si no usaste `BOOTSTRAP_PASSWORD`, completar registro con el email del bootstrap |
-| 4. (Opcional) Logs del processor | Local: `make logs` (AWS CLI con credenciales del lab)                                               |
-
-
-**Send test transactions** — inputs habituales: `count` (default `50000`), `fraud_pct` (`8`), `concurrency` (`128`). El generador corre en el EC2 on-prem vía SSM; el tráfico llega a SQS por VPN.
-
-Los productores on-prem continuos envían por defecto ~**50 tx/min** (2 instancias × 5 mensajes cada 12 s) con ~**8%** de transacciones con patrón de fraude. El resumen por email corre cada `fraud_alert_summary_interval_minutes` (default 7) y procesa hasta 500 alertas por envío.
-
-Equivalente local (mismas credenciales AWS que el lab):
-
-```bash
-python3 -m pip install boto3
-make init
-make send-test-tx
-```
-
-Parámetros opcionales:
-
-```bash
-make send-test-tx TX_COUNT=10000 FRAUD_PCT=30 TX_CONCURRENCY=256
-```
-
-Patrones generados: transacciones **normales** (usuarios recurrentes, montos bajos/medios) y **fraude** (account drain, country shift, card testing, etc.).
+El bucket de state S3 `itba-tp-fraud-tfstate-<account-id>` **no** se elimina con **Destroy**.
 
 ---
 
@@ -135,7 +148,7 @@ Provisiona la VPC privada que aloja toda la infraestructura. No tiene NAT Gatewa
 
 ### `modules/queue`
 
-Cola SQS de ingesta de transacciones con Dead Letter Queue. El acceso está restringido al rol IAM `LabRole` (único principal autorizado para `SendMessage`/`ReceiveMessage`) y se deniega cualquier tráfico no cifrado (`aws:SecureTransport = false`). La restricción de red queda garantizada arquitecturalmente por la combinación VPN Site-to-Site + Interface VPC Endpoint: el endpoint SQS solo es alcanzable desde dentro de la VPC, y la VPN es el único camino desde el on-prem hasta ella. Se intentó agregar un `Deny` explícito por CIDR/VPC mediante `aws:VpcSourceIp` y `aws:SourceVpc`, pero estas condition keys no se propagan para tráfico cross-VPC vía VPN hacia Interface Endpoints.
+Cola SQS de ingesta de transacciones con Dead Letter Queue. El acceso está restringido al rol IAM `LabRole` y se deniega cualquier tráfico no cifrado (`aws:SecureTransport = false`). La restricción de red queda garantizada arquitecturalmente por VPN Site-to-Site + Interface VPC Endpoint.
 
 **Recursos:** `[aws_sqs_queue.main](modules/queue/main.tf#L31)` + `[aws_sqs_queue.dlq](modules/queue/main.tf#L10)`, `[aws_sqs_queue_redrive_allow_policy.dlq](modules/queue/main.tf#L22)`, `[aws_sqs_queue_policy.main](modules/queue/main.tf#L98)` y `[aws_sqs_queue_policy.dlq](modules/queue/main.tf#L143)`
 
@@ -145,29 +158,27 @@ Cola SQS de ingesta de transacciones con Dead Letter Queue. El acceso está rest
 
 Toda la capa de persistencia del sistema en un único módulo:
 
-- **DynamoDB** `itba-tp-fraud-user-behavior`: `[aws_dynamodb_table.user_behavior](modules/data_store/main.tf#L13)` — perfiles de comportamiento de usuarios. Clave de partición `user_id`. Consultado por Fargate durante el scoring para enriquecer la decisión con historial del usuario.
-- **RDS PostgreSQL 17.4** `itba-tp-fraud-results-db`: `[aws_db_instance.results](modules/data_store/main.tf#L118)` almacena los resultados de scoring (`transaction_id`, `fraud_score`, `is_fraud`, `decision`, `processed_at`, etc.). Acceso exclusivo desde dentro de la VPC a través del RDS Proxy.
-- **Secrets Manager**: `[aws_secretsmanager_secret.db_credentials](modules/data_store/main.tf#L161)` y `[aws_secretsmanager_secret_version](modules/data_store/main.tf#L172)` — credenciales RDS en JSON para autenticación del proxy.
-- **RDS Proxy**: `[aws_db_proxy.results](modules/data_store/main.tf#L194)`, `[aws_db_proxy_default_target_group](modules/data_store/main.tf#L216)`, `[aws_db_proxy_target](modules/data_store/main.tf#L230)` — pool entre Lambdas y RDS; mitiga el agotamiento de conexiones en `db.t3.micro` (~50 conexiones máx).
-- **Security Group del proxy**: `[aws_security_group.proxy](modules/data_store/main.tf#L182)`; las reglas cruzadas con Lambdas/RDS están en la raíz — `[main.tf](main.tf#L169)` (`proxy_to_rds`, `rds_from_proxy`, `writer_lambda_to_proxy`, `api_lambda_to_proxy`, etc.) para evitar dependencias circulares entre módulos.
+- **DynamoDB** `itba-tp-fraud-user-behavior`: `[aws_dynamodb_table.user_behavior](modules/data_store/main.tf#L13)` — perfiles de comportamiento de usuarios. Clave de partición `user_id`. Consultado por Fargate durante el scoring.
+- **RDS PostgreSQL 17.4** `itba-tp-fraud-results-db`: `[aws_db_instance.results](modules/data_store/main.tf#L118)` — resultados de scoring. Acceso exclusivo desde la VPC vía RDS Proxy.
+- **Secrets Manager**: credenciales RDS para el proxy.
+- **RDS Proxy**: pool entre Lambdas y RDS en `db.t3.micro`.
+- Las reglas cruzadas de security group con Lambdas/RDS están en la raíz — `[main.tf](main.tf#L208)` — para evitar dependencias circulares entre módulos.
 
 ---
 
 ### `modules/compute`
 
-Motor de scoring corriendo en ECS Fargate. Lee transacciones de SQS, consulta DynamoDB, aplica el modelo ML (con fallback a reglas si el modelo no está disponible), publica todos los resultados en la cola de persistencia, y publica sólo fraudes en la cola de resúmenes.
+Motor de scoring en ECS Fargate. Lee transacciones de SQS, consulta DynamoDB, aplica el modelo ML (con fallback a reglas), publica resultados y encola fraudes para resumen.
 
-**Recursos:** `[aws_ecr_repository.app](modules/compute/main.tf#L48)`, `[aws_ecs_cluster.main](modules/compute/main.tf#L78)` (Container Insights en el cluster), `[aws_ecs_task_definition.app](modules/compute/main.tf#L142)`, `[aws_ecs_service.app](modules/compute/main.tf#L165)`, Application Auto Scaling (`[aws_appautoscaling_target](modules/compute/main.tf#L194)`, `[aws_appautoscaling_policy](modules/compute/main.tf#L204)`).
+**Recursos:** ECR, ECS cluster/service, Application Auto Scaling (`[modules/compute/main.tf](modules/compute/main.tf)`).
 
-**Auto Scaling**: política de target tracking con métrica compuesta `messages_per_task = ApproximateNumberOfMessagesVisible / max(RunningTaskCount, 1)`. Si el backlog supera 10 mensajes por task, escala horizontalmente hasta 10 tasks.
-
-**Variables de entorno del contenedor**: `QUEUE_URL`, `RESULTS_QUEUE_URL`, `FRAUD_ALERT_QUEUE_URL`, `DYNAMODB_TABLE_NAME`, `AWS_REGION`, `S3_AUDIT_BUCKET`.
+**Auto Scaling**: target tracking con `messages_per_task = ApproximateNumberOfMessagesVisible / max(RunningTaskCount, 1)`; escala hasta 10 tasks si el backlog supera 10 mensajes por task.
 
 ---
 
 ### `modules/notification`
 
-Composición de alertas resumidas. El processor no publica resultados crudos en SNS: encola sólo los fraudes en `itba-tp-fraud-fraud-alerts`, una Lambda programada cada `fraud_alert_summary_interval_minutes` minutos genera un resumen, y SNS lo distribuye a los emails confirmados.
+Alertas resumidas: fraudes en `itba-tp-fraud-fraud-alerts`, Lambda programada cada `fraud_alert_summary_interval_minutes`, SNS a emails confirmados.
 
 **Recursos:** submódulos `[topic](modules/notification/topic/main.tf)`, `[summary_queue](modules/notification/summary_queue/main.tf)` y `[summarizer](modules/notification/summarizer/main.tf)`.
 
@@ -175,70 +186,44 @@ Composición de alertas resumidas. El processor no publica resultados crudos en 
 
 ### `modules/results_writer`
 
-Pipeline SQS → Lambda para persistir resultados en RDS. El processor envía cada resultado directamente a esta cola.
+Pipeline SQS → Lambda → RDS. El processor envía cada resultado a esta cola.
 
-**Recursos:**
-
-- SQS `itba-tp-fraud-results-events` + DLQ: `[aws_sqs_queue.results](modules/results_writer/main.tf#L35)` + `[aws_sqs_queue.results_dlq](modules/results_writer/main.tf#L14)` (`[aws_sqs_queue_redrive_allow_policy.results_dlq](modules/results_writer/main.tf#L26)`, `[aws_sqs_queue_policy.results](modules/results_writer/main.tf#L114)`) — buffer con `maxReceiveCount = 3` y visibility timeout de 180s (≥6× el timeout de la Lambda)
-- Lambda Python 3.12 en VPC con psycopg2: `[aws_lambda_function.writer](modules/results_writer/main.tf#L163)`
-- Event Source Mapping: `[aws_lambda_event_source_mapping.sqs_results](modules/results_writer/main.tf#L201)`
-
-La Lambda crea la tabla `transactions` si no existe (schema migration automático en cold start) e inserta con `ON CONFLICT DO NOTHING` para idempotencia (importante dado que SQS puede entregar el mismo mensaje más de una vez).
+**Recursos:** cola `itba-tp-fraud-results-events` + DLQ, Lambda writer, event source mapping (`[modules/results_writer/main.tf](modules/results_writer/main.tf)`).
 
 ---
 
 ### `modules/api`
 
-API REST serverless protegida por Cognito que sirve los datos del dashboard.
-
-**Endpoints:**
+API REST protegida por Cognito para el dashboard.
 
 
-| Método | Path                      | Descripción                                                                                           |
-| ------ | ------------------------- | ----------------------------------------------------------------------------------------------------- |
-| GET    | `/health`                 | Health check con ping a RDS (requiere JWT Cognito)                                                    |
-| GET    | `/dashboard/me`           | Perfil del dashboard user autenticado; activa invitaciones pendientes si el email verificado coincide |
-| GET    | `/dashboard/invites`      | Lista de invitaciones/accesos del dashboard (solo bootstrap admin)                                    |
-| POST   | `/dashboard/invites`      | Crea o reactiva una invitación por email (solo bootstrap admin)                                       |
-| DELETE | `/dashboard/invites/{id}` | Soft-disable de un acceso de dashboard (solo bootstrap admin; no aplica al bootstrap admin)           |
-| PUT    | `/dashboard/me/password`  | Cambio de contraseña para usuarios Cognito locales                                                    |
-| GET    | `/stats`                  | Totales: transacciones, bloqueadas, permitidas, challenge                                             |
-| GET    | `/transactions?limit=N`   | Últimas N transacciones (máx 100)                                                                     |
+| Método          | Path                     | Descripción                                     |
+| --------------- | ------------------------ | ----------------------------------------------- |
+| GET             | `/health`                | Health check con ping a RDS (JWT Cognito)       |
+| GET             | `/dashboard/me`          | Perfil del usuario autenticado                  |
+| GET/POST/DELETE | `/dashboard/invites`     | Gestión de invitaciones (solo bootstrap admin)  |
+| PUT             | `/dashboard/me/password` | Cambio de contraseña (usuarios Cognito locales) |
+| GET             | `/stats`                 | Totales de transacciones                        |
+| GET             | `/transactions?limit=N`  | Últimas N transacciones (máx. 100)              |
 
-
-**Recursos:** `[aws_lambda_function.api](modules/api/main.tf#L51)` (Python 3.12 en VPC + psycopg2), `[aws_apigatewayv2_api.main](modules/api/main.tf#L88)` (HTTP API), `[aws_apigatewayv2_stage.default](modules/api/main.tf#L117)` (`$default`, `auto_deploy = true`), integración y rutas: `[aws_apigatewayv2_integration.lambda](modules/api/main.tf#L128)`, `[aws_apigatewayv2_route](modules/api/main.tf#L135)` (`/transactions`, `/stats`, `/health` y [catch-all `$default](modules/api/main.tf#L154)`).
 
 ---
 
 ### `modules/onprem_sim`
 
-Simula un sitio corporativo on-premise conectado a AWS mediante una VPN Site-to-Site.
-
-**Recursos:**
-
-- VPC pública `192.168.0.0/16`: `[aws_vpc.onprem](modules/onprem_sim/main.tf#L18)`, subnets/IGW/rutas en el mismo archivo; EC2 strongSwan vía `[aws_cloudformation_stack.strongswan](modules/onprem_sim/main.tf#L225)` y plantilla `[templates/vpn-gateway-strongswan.yml](templates/vpn-gateway-strongswan.yml)`
-- Productores de tráfico: `[aws_instance.producer](modules/onprem_sim/producers.tf)` (`for_each` → `producer-1`, `producer-2`) con servicio `systemd` `onprem-tx-producer` que envía transacciones sintéticas continuas a la cola de ingesta (default ~5 msgs / 12 s por instancia ≈ 50 tx/min en total)
-- VPN: `[aws_customer_gateway.cgw](modules/onprem_sim/main.tf#L158)`, `[aws_vpn_connection.vpn](modules/onprem_sim/main.tf#L168)` (2 túneles BGP contra el VGW)
-- PSKs: `[aws_secretsmanager_secret` / `secret_version` túnel 1 y 2](modules/onprem_sim/main.tf#L184)
-- Route 53 Private Hosted Zone: `[aws_route53_zone.sqs_private](modules/onprem_sim/main.tf#L296)`, `[aws_route53_record.sqs_apex](modules/onprem_sim/main.tf#L314)` — resuelve `sqs.<region>.amazonaws.com` a las IPs privadas del VPC Endpoint
-
-Controlado por `[var.enable_onprem_sim](variables.tf#L106)` (default: `true`) y `[var.enable_onprem_traffic_producers](variables.tf#L112)` (default: `true`). Poner `enable_onprem_sim = false` destruye la simulación on-prem; `enable_onprem_traffic_producers = false` elimina solo los EC2 productores.
+Simulación on-prem con VPN Site-to-Site, strongSwan, productores EC2 y DNS privado para el VPCE de SQS. Gated por `var.enable_onprem_sim` (default `true`).
 
 ---
 
 ### `modules/dashboard`
 
-Sitio web estático en S3 con el panel de operaciones. Muestra las últimas transacciones y estadísticas en tiempo real consumiendo la API Gateway.
+Sitio estático en S3. Terraform crea bucket y objetos iniciales; **Deploy** publica el build actualizado con `aws s3 sync`.
 
-**Recursos:** `[aws_s3_bucket.dashboard](modules/dashboard/main.tf#L9)`, `[aws_s3_bucket_website_configuration.dashboard](modules/dashboard/main.tf#L23)`, `[aws_s3_bucket_policy.dashboard](modules/dashboard/main.tf#L41)`, objetos estáticos: `[aws_s3_object.index_html](modules/dashboard/main.tf#L58)`, `[aws_s3_object.app_js](modules/dashboard/main.tf#L72)`, `[aws_s3_object.config_js](modules/dashboard/main.tf#L86)` (`templatefile()` con la URL de API Gateway).
-
-Terraform crea el bucket y objetos iniciales; el contenido actualizado del frontend se publica con `aws s3 sync` al final del workflow **Deploy** (manual).
+---
 
 ### `modules/auth`
 
-Capa de autenticación del dashboard. Crea un Cognito User Pool con email como identidad de acceso, self-signup habilitado, Hosted UI, dominio administrado `itba-fraud-auth-<account-id>` y un app client público para flujo Authorization Code + PKCE. Google OAuth es opcional y sólo se habilita si se pasan `GOOGLE_OAUTH_CLIENT_ID` y `GOOGLE_OAUTH_CLIENT_SECRET` al plan/apply.
-
-La autorización final no vive sólo en Cognito: la Lambda API mantiene una tabla `dashboard_access` en RDS. Un usuario puede autenticarse correctamente en Cognito y aun así quedar bloqueado si su email verificado no fue pre-invitado por el bootstrap admin.
+Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, app client PKCE. Google OAuth opcional vía secrets `GOOGLE_OAUTH_`*. Autorización fina en RDS (`dashboard_access`).
 
 ---
 
@@ -247,55 +232,35 @@ La autorización final no vive sólo en Cognito: la Lambda API mantiene una tabl
 ### Funciones utilizadas
 
 
-| Función                | Dónde                                                           | Para qué                                                        |
-| ---------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- |
-| `format()`             | Todos los módulos                                               | Construir nombres de recursos con prefijo del proyecto          |
-| `merge()`              | Todos los módulos                                               | Combinar `common_tags` con tags específicos del recurso         |
-| `cidrsubnet()`         | `modules/network`                                               | Calcular CIDRs de subnets privadas a partir del CIDR de la VPC  |
-| `toset()`              | `modules/network`                                               | Convertir la lista de servicios Gateway a set para `for_each`   |
-| `slice()`              | `main.tf`                                                       | Tomar las primeras 2 AZs disponibles en la región               |
-| `jsonencode()`         | `modules/queue`, `modules/results_writer`, `modules/data_store` | Serializar políticas IAM y configuraciones como JSON            |
-| `contains()`           | Variables con `validation`                                      | Validar que valores numéricos estén dentro de rangos permitidos |
-| `can()` + `cidrhost()` | Variables con `validation`                                      | Validar que CIDRs sean IPv4 válidos                             |
-| `replace()`            | `modules/network`                                               | Normalizar nombres de endpoints (reemplazar `_` por `-`)        |
-| `templatefile()`       | `modules/dashboard`                                             | Inyectar la URL de API Gateway en `config.js` en deploy time    |
-| `filebase64sha256()`   | `main.tf`                                                       | Hash del zip de la capa psycopg2 para detectar cambios          |
-| `filemd5()`            | `modules/dashboard`                                             | Hash de archivos estáticos del dashboard                        |
-| `length()`             | Validaciones y lógica de red                                    | Contar elementos en listas                                      |
+| Función                | Dónde                      | Para qué                                     |
+| ---------------------- | -------------------------- | -------------------------------------------- |
+| `format()`             | Todos los módulos          | Nombres de recursos con prefijo del proyecto |
+| `merge()`              | Todos los módulos          | Combinar `common_tags` con tags del recurso  |
+| `cidrsubnet()`         | `modules/network`          | CIDRs de subnets privadas                    |
+| `toset()`              | `modules/network`          | Set para `for_each` en gateway endpoints     |
+| `slice()`              | `main.tf`                  | Primeras 2 AZs de la región                  |
+| `jsonencode()`         | Colas, data store          | Políticas IAM en JSON                        |
+| `contains()`           | Variables con `validation` | Rangos permitidos                            |
+| `can()` + `cidrhost()` | Variables con `validation` | CIDRs IPv4 válidos                           |
+| `replace()`            | `modules/network`          | Normalizar nombres de endpoints              |
+| `templatefile()`       | `modules/dashboard`        | Inyectar URL de API en `config.js`           |
+| `filebase64sha256()`   | `main.tf`                  | Hash de la capa psycopg2                     |
+| `filemd5()`            | `modules/dashboard`        | Hash de archivos estáticos                   |
+| `length()`             | Validaciones y red         | Contar elementos en listas                   |
 
 
 ### Meta-argumentos utilizados
 
 
-| Meta-argumento                        | Dónde                                       | Para qué                                                                                                                                                             |
-| ------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `for_each`                            | `modules/network` — VPC Endpoints           | Crear un endpoint por servicio (sqs, ecr_api, ecr_dkr, logs, sns, secretsmanager, cognito_idp, s3, dynamodb) desde un mapa/set, evitando duplicar bloques de recurso |
-| `count`                               | `main.tf` — `module.onprem_sim`             | Crear o no la simulación on-prem según `var.enable_onprem_sim`. Permite habilitar/deshabilitar toda la infraestructura VPN con un flag                               |
-| `lifecycle { ignore_changes }`        | `modules/compute` — ECS Service             | Ignora cambios en `desired_count` para que Application Auto Scaling sea el dueño del número de tasks, sin que Terraform lo revierta en cada apply                    |
-| `lifecycle { ignore_changes }`        | `modules/data_store` — RDS Instance         | Ignora cambios en `password` para que Terraform no intente actualizar la contraseña (RDS no expone la contraseña actual al provider)                                 |
-| `lifecycle { ignore_changes }`        | `modules/dashboard` — S3 Objects            | Los archivos HTML/JS son actualizados por CI con `aws s3 sync`; Terraform los crea una vez y luego ignora cambios para no entrar en conflicto con el pipeline        |
-| `lifecycle { create_before_destroy }` | `main.tf` — Lambda Layer                    | Garantiza que la nueva versión de la capa psycopg2 esté disponible antes de destruir la anterior, evitando downtime en las Lambdas                                   |
-| `depends_on`                          | `modules/compute` — ECS Service             | Fuerza que las reglas de egress del SG existan antes de crear el servicio ECS                                                                                        |
-| `depends_on`                          | `modules/onprem_sim` — CloudFormation stack | Espera a que los Secrets Manager secret versions con los PSKs estén creados antes de levantar el router strongSwan                                                   |
-| `validation`                          | Todas las variables                         | Valida tipos, rangos y formatos (CIDRs, ARNs, valores permitidos de CPU/memoria) en tiempo de `terraform plan`, antes de hacer ningún cambio en AWS                  |
+| Meta-argumento                        | Dónde                                      | Para qué                                                        |
+| ------------------------------------- | ------------------------------------------ | --------------------------------------------------------------- |
+| `for_each`                            | `modules/network` — VPC Endpoints          | Un endpoint por servicio desde un mapa/set                      |
+| `count`                               | `main.tf` — `module.onprem_sim`            | Activar o no la simulación on-prem                              |
+| `lifecycle { ignore_changes }`        | ECS service, RDS, objetos S3 del dashboard | Delegar capacidad a autoscaling / CI / evitar drift de password |
+| `lifecycle { create_before_destroy }` | Lambda Layer psycopg2                      | Nueva versión antes de destruir la anterior                     |
+| `depends_on`                          | ECS service, stack strongSwan              | Ordenar dependencias explícitas                                 |
+| `validation`                          | Variables                                  | Validar en `terraform plan`                                     |
 
-
----
-
-## Dashboard y autenticación
-
-Tras un **Deploy** exitoso, usar `dashboard_url` del **job summary** (no el endpoint HTTP de S3 website: PKCE requiere HTTPS).
-
-- **Transaction User**: `user_id` de las transacciones financieras.
-- **Dashboard User**: persona autenticada en Cognito.
-
-Cognito autentica; RDS autoriza vía `dashboard_access`. El bootstrap admin invita emails desde la pestaña **Invitaciones**; el invitado se registra en Cognito con el mismo email.
-
-Para Google OAuth, registrar en Google Cloud el redirect URI:
-
-```text
-https://itba-fraud-auth-<account-id>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
-```
 
 ---
 
@@ -303,39 +268,19 @@ https://itba-fraud-auth-<account-id>.auth.us-east-1.amazoncognito.com/oauth2/idp
 
 ```
 .
-├── main.tf                  # Composición raíz — wiring de todos los módulos
-├── variables.tf             # Variables de entrada de la composición
-├── outputs.tf               # Outputs expuestos
-├── versions.tf              # Versiones de Terraform y providers
-├── backend.tf               # Backend S3 (partial config, bucket se pasa en init)
-├── terraform.tfvars.example # Plantilla de configuración
-├── Makefile                 # Targets: init, plan, apply, destroy, build-layers, seed, send-test-tx, logs
-├── .github/workflows/       # Validate, Plan, Deploy, Dashboard URL, Terraform Apply, Destroy, Send test transactions
-├── modules/
-│   ├── network/             # VPC, subnets, VPN Gateway, VPC Endpoints
-│   ├── queue/               # SQS ingesta + DLQ + CIDR lock on-prem
-│   ├── data_store/          # DynamoDB + RDS + RDS Proxy + Secrets Manager
-│   ├── compute/             # ECR + ECS Fargate + Auto Scaling
-│   ├── onprem_sim/          # VPC on-prem + strongSwan EC2 + VPN site-to-site
-│   ├── notification/        # SNS resumen + SQS alertas + Lambda summarizer
-│   ├── results_writer/      # SQS resultados + Lambda writer (processor→SQS→Lambda→RDS)
-│   ├── api/                 # Lambda API + HTTP API Gateway
-│   └── dashboard/           # S3 bucket + website config + config.js templating
-├── app/
-│   ├── processor/           # Motor de scoring en Go (SQS consumer → SQS publishers)
-│   ├── notification/        # Código Python de la Lambda summarizer de alertas
-│   ├── api/                 # Dashboard API Lambda handler (Python)
-│   └── dashboard/           # Frontend vanilla JS (index.html, app.js)
-├── layers/
-│   └── psycopg2/            # Layer psycopg2 (generado por make build-layers)
-├── templates/
-│   └── vpn-gateway-strongswan.yml  # CloudFormation template del router on-prem
-├── ARCHITECTURE.md          # Arquitectura detallada y trade-offs
-├── CONTRIBUTING.md          # Branching, commits, PR checklist
-└── docs/
-    ├── STYLE_GUIDE.md       # Convenciones HCL
-    ├── NAMING.md            # Nomenclatura de recursos
-    ├── WORKFLOW.md          # Flujo init/plan/apply
-    ├── SECURITY.md          # Qué nunca commitear
-    └── CONSIGNA.md          # Requisitos del trabajo práctico
+├── main.tf                  # Composición raíz
+├── variables.tf
+├── outputs.tf
+├── versions.tf
+├── backend.tf
+├── .github/workflows/       # Validate, Plan, Deploy, Destroy, Send test transactions
+├── modules/                 # network, queue, data_store, compute, onprem_sim, notification, results_writer, api, dashboard, auth
+├── app/                     # processor, api, results_writer, notification, dashboard
+├── layers/psycopg2/         # Capa Lambda (generada en CI)
+├── templates/               # CloudFormation strongSwan on-prem
+├── ARCHITECTURE.md
+├── CONTRIBUTING.md
+└── docs/                    # STYLE_GUIDE, NAMING, WORKFLOW, SECURITY, CONSIGNA
 ```
+
+Documentación operativa adicional para contribuidores: `[CONTRIBUTING.md](CONTRIBUTING.md)`, `[docs/WORKFLOW.md](docs/WORKFLOW.md)`.
