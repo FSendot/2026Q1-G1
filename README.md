@@ -17,7 +17,30 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 Toda la operación del lab (deploy, pruebas, destrucción) se hace desde **GitHub Actions**.
 
-Para mantener una rama de entrega sincronizada con un repositorio/fork usado para el PR de la cátedra, ver `[docs/SUBMISSION_SYNC.md](docs/SUBMISSION_SYNC.md)`.
+---
+
+## Prerrequisitos
+
+| Herramienta | Versión / nota |
+| ----------- | -------------- |
+| Terraform | `terraform -v` → mínimo `~> 1.9` (ver [`versions.tf`](versions.tf)) |
+| AWS CLI | `aws --version` — [instalación](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+
+El despliegue real del lab se ejecuta en **GitHub Actions** con los secrets del repositorio (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, etc.). No es obligatorio configurar `aws configure` en la máquina local salvo que quieras correr Terraform o la CLI contra la cuenta del lab por tu cuenta.
+
+Documentación de arquitectura y decisiones de diseño: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+---
+
+## Integrantes
+
+| Nombre | Legajo |
+| ------ | ------ |
+| Campoli, Lucas | 63295 |
+| Fernandez Dinardo, Juan Ignacio | 62466 |
+| Mutz, Matías Ignacio | 63590 |
+| Sendot, Francisco Nicolás | 62351 |
+| Taurian, Magdalena | 62828 |
 
 ---
 
@@ -143,10 +166,10 @@ Provisiona la VPC privada que aloja toda la infraestructura. No tiene NAT Gatewa
 
 **Recursos clave:**
 
-- `[module "vpc"](modules/network/main.tf#L22)` (`terraform-aws-modules/vpc/aws`): VPC `10.0.0.0/16` con tres tiers de subnets privadas (app, data, endpoints) en dos AZs; Virtual Private Gateway (VGW) para la VPN site-to-site vía `[enable_vpn_gateway](modules/network/main.tf#L38)`
+- `[module "vpc"](modules/network/main.tf#L22)` (`terraform-aws-modules/vpc/aws`): VPC `10.0.0.0/16` con tres tiers de subnets privadas (app, data, endpoints) en dos AZs; Virtual Private Gateway (VGW) para la VPN site-to-site vía `[enable_vpn_gateway](modules/network/main.tf#L38)`, con propagación hacia las route tables de app y endpoints.
 - **Gateway VPC Endpoints** (S3, DynamoDB): `[aws_vpc_endpoint.gateway](modules/network/main.tf#L83)`
 - **Interface VPC Endpoints** (SQS, ECR API, ECR DKR, CloudWatch Logs, SNS, Secrets Manager, Cognito IDP): `[aws_vpc_endpoint.interface](modules/network/main.tf#L97)`
-- Cuando la simulación on-prem está habilitada, el Security Group de endpoints también permite HTTPS desde `192.168.0.0/16` para que el EC2 on-prem resuelva `sqs.<region>.amazonaws.com` hacia el VPCE y envíe tráfico por la VPN.
+- Cuando la simulación on-prem está habilitada, el Security Group de endpoints también permite HTTPS desde `192.168.0.0/16` para que el EC2 on-prem resuelva `sqs.<region>.amazonaws.com` hacia el VPCE y envíe tráfico por la VPN; la route table de endpoints propaga el VGW para que el tráfico de respuesta vuelva al CIDR on-prem.
 
 **Módulo externo**: el pin `~> 5.13` está en `[modules/network/main.tf](modules/network/main.tf#L22)`; los VPC Endpoints propios son los recursos enlazados arriba.
 
@@ -284,9 +307,7 @@ Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, ap
 ├── app/                     # processor, api, results_writer, notification, dashboard
 ├── layers/psycopg2/         # Capa Lambda (generada en CI)
 ├── templates/               # CloudFormation strongSwan on-prem
-├── ARCHITECTURE.md
-├── CONTRIBUTING.md
-└── docs/                    # STYLE_GUIDE, NAMING, WORKFLOW, SECURITY, SUBMISSION_SYNC, CONSIGNA
+└── ARCHITECTURE.md          # Arquitectura, flujos y trade-offs del lab
 ```
 
-Documentación operativa adicional para contribuidores: `[CONTRIBUTING.md](CONTRIBUTING.md)`, `[docs/WORKFLOW.md](docs/WORKFLOW.md)`, `[docs/SUBMISSION_SYNC.md](docs/SUBMISSION_SYNC.md)`.
+Arquitectura y decisiones de diseño: [`ARCHITECTURE.md`](ARCHITECTURE.md).

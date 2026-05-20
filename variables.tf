@@ -104,7 +104,7 @@ variable "results_writer_batching_window_seconds" {
 }
 
 variable "enable_onprem_sim" {
-  description = "Habilita la VPC simulada de on-premise con su EC2 strongSwan, Customer Gateway, conexión Site-to-Site VPN contra el VGW, la Private Hosted Zone para SQS y el lockdown de la cola al CIDR on-premise."
+  description = "Habilita la VPC simulada de on-premise con su EC2 strongSwan, Customer Gateway, conexión Site-to-Site VPN contra el VGW y la Private Hosted Zone para SQS. La ingesta queda acotada arquitecturalmente por VPN + VPCE + SG (sin condiciones aws:SourceVpc en la cola)."
   type        = bool
   default     = true
 }
