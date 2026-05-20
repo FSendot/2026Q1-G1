@@ -120,7 +120,6 @@ resource "aws_security_group" "rds" {
 }
 
 resource "aws_db_instance" "results" {
-  # checkov:skip=CKV_AWS_157: Multi-AZ deshabilitado para reducir costo en lab académico.
   # checkov:skip=CKV_AWS_133: Enhanced Monitoring deshabilitado (lab; requiere rol IAM extra no disponible en Academy).
   # checkov:skip=CKV_AWS_118: Performance Insights deshabilitado (lab cost).
   # checkov:skip=CKV_AWS_293: Deletion protection deshabilitado para permitir terraform destroy en lab.
@@ -145,7 +144,7 @@ resource "aws_db_instance" "results" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
 
-  multi_az                            = false
+  multi_az                            = true
   backup_retention_period             = 0
   skip_final_snapshot                 = true
   deletion_protection                 = false
