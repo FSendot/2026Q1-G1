@@ -23,6 +23,17 @@ resource "aws_s3_bucket" "dashboard" {
   })
 }
 
+resource "aws_s3_bucket_server_side_encryption_configuration" "dashboard" {
+  bucket = aws_s3_bucket.dashboard.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      # checkov:skip=CKV2_AWS_67: AWS Academy no permite KMS CMK; AES256 cumple el requisito de cifrado at-rest.
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 resource "aws_s3_bucket_versioning" "dashboard" {
   bucket = aws_s3_bucket.dashboard.id
 
