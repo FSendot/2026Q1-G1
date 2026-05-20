@@ -17,6 +17,8 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 Toda la operación del lab (deploy, pruebas, destrucción) se hace desde **GitHub Actions**.
 
+Para mantener una rama de entrega sincronizada con un repositorio/fork usado para el PR de la cátedra, ver `[docs/SUBMISSION_SYNC.md](docs/SUBMISSION_SYNC.md)`.
+
 ---
 
 ## GitHub Actions
@@ -280,7 +282,7 @@ Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, ap
 ├── templates/               # CloudFormation strongSwan on-prem
 ├── ARCHITECTURE.md
 ├── CONTRIBUTING.md
-└── docs/                    # STYLE_GUIDE, NAMING, WORKFLOW, SECURITY, CONSIGNA
+└── docs/                    # STYLE_GUIDE, NAMING, WORKFLOW, SECURITY, SUBMISSION_SYNC, CONSIGNA
 ```
 
-Documentación operativa adicional para contribuidores: `[CONTRIBUTING.md](CONTRIBUTING.md)`, `[docs/WORKFLOW.md](docs/WORKFLOW.md)`.
+Documentación operativa adicional para contribuidores: `[CONTRIBUTING.md](CONTRIBUTING.md)`, `[docs/WORKFLOW.md](docs/WORKFLOW.md)`, `[docs/SUBMISSION_SYNC.md](docs/SUBMISSION_SYNC.md)`.

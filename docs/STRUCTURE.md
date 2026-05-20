@@ -25,6 +25,7 @@
 │   ├── NAMING.md
 │   ├── WORKFLOW.md
 │   ├── SECURITY.md
+│   ├── SUBMISSION_SYNC.md
 │   ├── CONSIGNA.md
 │   └── adr/
 ├── modules/
