@@ -8,9 +8,24 @@ output "vpc_cidr" {
   value       = module.network.vpc_cidr
 }
 
+output "app_subnet_ids" {
+  description = "IDs de las subnets privadas de aplicación (ECS Fargate y Lambdas)."
+  value       = module.network.app_subnet_ids
+}
+
+output "data_subnet_ids" {
+  description = "IDs de las subnets privadas de datos (RDS PostgreSQL y RDS Proxy)."
+  value       = module.network.data_subnet_ids
+}
+
+output "endpoint_subnet_ids" {
+  description = "IDs de las subnets privadas dedicadas a Interface VPC Endpoints."
+  value       = module.network.endpoint_subnet_ids
+}
+
 output "private_subnet_ids" {
-  description = "IDs de las subnets privadas donde se despliegan las tasks de Fargate."
-  value       = module.network.private_subnet_ids
+  description = "Alias de app_subnet_ids; preferir app_subnet_ids."
+  value       = module.network.app_subnet_ids
 }
 
 output "endpoint_security_group_id" {

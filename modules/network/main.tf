@@ -16,7 +16,11 @@ locals {
 
   gateway_endpoint_services = toset(["s3", "dynamodb"])
 
-  private_subnet_cidrs = [for i, _ in var.azs : cidrsubnet(var.vpc_cidr, 4, i)]
+  az_count = length(var.azs)
+
+  app_subnet_cidrs      = [for i, _ in var.azs : cidrsubnet(var.vpc_cidr, 4, i)]
+  data_subnet_cidrs     = [for i, _ in var.azs : cidrsubnet(var.vpc_cidr, 4, i + local.az_count)]
+  endpoint_subnet_cidrs = [for i, _ in var.azs : cidrsubnet(var.vpc_cidr, 4, i + 2 * local.az_count)]
 }
 
 module "vpc" {
@@ -27,9 +31,13 @@ module "vpc" {
   name = format("%s-vpc", var.project)
   cidr = var.vpc_cidr
 
-  azs             = var.azs
-  private_subnets = local.private_subnet_cidrs
-  public_subnets  = []
+  azs              = var.azs
+  private_subnets  = local.app_subnet_cidrs
+  database_subnets = local.data_subnet_cidrs
+  intra_subnets    = local.endpoint_subnet_cidrs
+  public_subnets   = []
+
+  create_database_subnet_group = false
 
   enable_dns_hostnames = true
   enable_dns_support   = true
@@ -46,7 +54,15 @@ module "vpc" {
   tags = local.module_tags
 
   private_subnet_tags = {
-    Tier = "private"
+    Tier = "app"
+  }
+
+  database_subnet_tags = {
+    Tier = "data"
+  }
+
+  intra_subnet_tags = {
+    Tier = "endpoints"
   }
 }
 
@@ -56,7 +72,7 @@ data "aws_vpc_endpoint_service" "cognito_idp" {
 
 locals {
   cognito_idp_subnet_ids = [
-    for i, az in var.azs : module.vpc.private_subnets[i]
+    for i, az in var.azs : module.vpc.intra_subnets[i]
     if contains(data.aws_vpc_endpoint_service.cognito_idp.availability_zones, az)
   ]
 }
@@ -64,13 +80,13 @@ locals {
 check "cognito_idp_subnet_coverage" {
   assert {
     condition     = length(local.cognito_idp_subnet_ids) > 0
-    error_message = "Ninguna subnet privada está en una AZ que soporte el VPC endpoint cognito-idp. Ajustá var.azs en la composición raíz."
+    error_message = "Ninguna subnet de endpoints está en una AZ que soporte el VPC endpoint cognito-idp. Ajustá var.azs en la composición raíz."
   }
 }
 
 resource "aws_security_group" "endpoints" {
   name        = format("%s-endpoints-sg", var.project)
-  description = "SG para los Interface VPC Endpoints; permite HTTPS desde la VPC."
+  description = "SG para los Interface VPC Endpoints; permite HTTPS desde las subnets de aplicación y CIDRs adicionales autorizados."
   vpc_id      = module.vpc.vpc_id
 
   tags = merge(local.module_tags, {
@@ -78,10 +94,12 @@ resource "aws_security_group" "endpoints" {
   })
 }
 
-resource "aws_vpc_security_group_ingress_rule" "endpoints_https_from_vpc" {
+resource "aws_vpc_security_group_ingress_rule" "endpoints_https_from_app_subnet" {
+  for_each = toset(local.app_subnet_cidrs)
+
   security_group_id = aws_security_group.endpoints.id
-  description       = "HTTPS desde clientes dentro de la VPC"
-  cidr_ipv4         = var.vpc_cidr
+  description       = "HTTPS desde subnets de aplicación"
+  cidr_ipv4         = each.value
   ip_protocol       = "tcp"
   from_port         = 443
   to_port           = 443
@@ -102,10 +120,12 @@ resource "aws_vpc_security_group_ingress_rule" "endpoints_https_from_additional_
   tags = local.module_tags
 }
 
-resource "aws_vpc_security_group_egress_rule" "endpoints_to_vpc" {
+resource "aws_vpc_security_group_egress_rule" "endpoints_to_app_subnet" {
+  for_each = toset(local.app_subnet_cidrs)
+
   security_group_id = aws_security_group.endpoints.id
-  description       = "Respuestas hacia clientes dentro de la VPC"
-  cidr_ipv4         = var.vpc_cidr
+  description       = "Respuestas hacia subnets de aplicación"
+  cidr_ipv4         = each.value
   ip_protocol       = "-1"
 
   tags = local.module_tags
@@ -141,7 +161,7 @@ resource "aws_vpc_endpoint" "interface" {
   vpc_id              = module.vpc.vpc_id
   service_name        = each.value
   vpc_endpoint_type   = "Interface"
-  subnet_ids          = module.vpc.private_subnets
+  subnet_ids          = module.vpc.intra_subnets
   security_group_ids  = [aws_security_group.endpoints.id]
   private_dns_enabled = true
 

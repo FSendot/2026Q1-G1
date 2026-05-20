@@ -8,7 +8,7 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 - `aws_cloudwatch_log_group.app` — `/ecs/<project>-fraud-engine`. Retention configurable via `log_retention_days`.
 - `aws_ecs_cluster.main` — `<project>-cluster`, `containerInsights = enabled`.
 - `aws_ecs_task_definition.app` — Fargate, awsvpc, X86_64/Linux. Both `task_role_arn` and `execution_role_arn` are passed in (LabRole in the lab). The container runs with `readonlyRootFilesystem = true`, `privileged = false`, and gets `AWS_REGION`, `QUEUE_URL`, `QUEUE_NAME`, `DYNAMODB_TABLE_NAME`, `RESULTS_QUEUE_URL`, `FRAUD_ALERT_QUEUE_URL`, `PROCESSOR_CONCURRENCY`, and `PROCESSOR_POLLERS` as env vars.
-- `aws_ecs_service.app` — runs `desired_count` tasks across `private_subnet_ids`, `assign_public_ip = false`, attached to the dedicated task SG. `lifecycle { ignore_changes = [desired_count] }` so Application Auto Scaling owns the running count.
+- `aws_ecs_service.app` — runs `desired_count` tasks across app-tier `private_subnet_ids`, `assign_public_ip = false`, attached to the dedicated task SG. `lifecycle { ignore_changes = [desired_count] }` so Application Auto Scaling owns the running count.
 - `aws_security_group.task` — ingress empty, egress only to the endpoint SG on tcp/443.
 - `aws_appautoscaling_target.ecs` — Application Auto Scaling target on `ecs:service:DesiredCount`.
 - `aws_appautoscaling_policy.queue_depth_target` — `TargetTrackingScaling` with a metric math expression: `messages_per_task = ApproximateNumberOfMessagesVisible / max(RunningTaskCount, 1)`. Target value defaults to 10 messages per task.
@@ -21,7 +21,7 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 | `project`                         | `string`       | n/a     | Resource-name prefix.                                                    |
 | `tags`                            | `map(string)`  | `{}`    | Common tags merged with `Component = "compute"`.                         |
 | `vpc_id`                          | `string`       | n/a     | VPC where the service runs.                                              |
-| `private_subnet_ids`              | `list(string)` | n/a     | Private subnets (≥2) for the service.                                    |
+| `private_subnet_ids`              | `list(string)` | n/a     | App-tier subnets (≥2) for the service.                                    |
 | `endpoint_security_group_id`      | `string`       | n/a     | Endpoint SG; the task SG only egresses here on tcp/443.                  |
 | `task_role_arn`                   | `string`       | n/a     | LabRole ARN (task role).                                                 |
 | `execution_role_arn`              | `string`       | n/a     | LabRole ARN (execution role).                                            |

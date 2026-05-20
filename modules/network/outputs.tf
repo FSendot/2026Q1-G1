@@ -8,13 +8,33 @@ output "vpc_cidr" {
   value       = module.vpc.vpc_cidr_block
 }
 
-output "private_subnet_ids" {
-  description = "Lista de IDs de las subnets privadas, una por AZ."
+output "app_subnet_ids" {
+  description = "Lista de IDs de las subnets privadas de aplicación (compute), una por AZ."
   value       = module.vpc.private_subnets
 }
 
+output "data_subnet_ids" {
+  description = "Lista de IDs de las subnets privadas de datos (RDS y RDS Proxy), una por AZ."
+  value       = module.vpc.database_subnets
+}
+
+output "endpoint_subnet_ids" {
+  description = "Lista de IDs de las subnets privadas dedicadas a Interface VPC Endpoints, una por AZ."
+  value       = module.vpc.intra_subnets
+}
+
+output "private_subnet_ids" {
+  description = "Alias de app_subnet_ids; preferir app_subnet_ids en código nuevo."
+  value       = module.vpc.private_subnets
+}
+
+output "app_route_table_ids" {
+  description = "IDs de las route tables asociadas a las subnets de aplicación (incluyen rutas de Gateway VPCE)."
+  value       = module.vpc.private_route_table_ids
+}
+
 output "private_route_table_ids" {
-  description = "IDs de las route tables asociadas a las subnets privadas."
+  description = "Alias de app_route_table_ids; preferir app_route_table_ids en código nuevo."
   value       = module.vpc.private_route_table_ids
 }
 
@@ -37,12 +57,12 @@ output "interface_endpoint_ids" {
 }
 
 output "cognito_idp_subnet_ids" {
-  description = "Subnets privadas donde se desplegó el VPC endpoint cognito-idp (solo AZs soportadas por el servicio)."
+  description = "Subnets de endpoints donde se desplegó el VPC endpoint cognito-idp (solo AZs soportadas por el servicio)."
   value       = local.cognito_idp_subnet_ids
 }
 
 output "sqs_vpc_endpoint_network_interface_ids" {
-  description = "IDs de las ENIs del Interface VPC Endpoint de SQS (una por subnet privada)."
+  description = "IDs de las ENIs del Interface VPC Endpoint de SQS (una por subnet de endpoints)."
   value       = tolist(aws_vpc_endpoint.interface["sqs"].network_interface_ids)
 }
 

@@ -27,7 +27,7 @@ Provisions the dashboard API: a Lambda function running inside the VPC (to reach
 | `tags`                      | `map(string)`  | `{}`    | Common tags merged with `Component = "api"`.                                  |
 | `principal_arn`             | `string`       | n/a     | LabRole ARN used as Lambda execution role.                                    |
 | `vpc_id`                    | `string`       | n/a     | VPC where the Lambda is deployed.                                             |
-| `private_subnet_ids`        | `list(string)` | n/a     | Private subnets for the Lambda VPC config.                                    |
+| `private_subnet_ids`        | `list(string)` | n/a     | App-tier subnets for the Lambda VPC config.                                    |
 | `endpoint_security_group_id`| `string`       | n/a     | VPC endpoint SG; the Lambda opens egress tcp/443 here (Logs endpoint).        |
 | `db_host`                   | `string`       | n/a     | RDS hostname (`DB_HOST` env var).                                             |
 | `db_port`                   | `number`       | `5432`  | RDS port (`DB_PORT` env var).                                                 |
@@ -60,7 +60,7 @@ module "api" {
   project                    = local.project
   principal_arn              = data.aws_iam_role.lab.arn
   vpc_id                     = module.network.vpc_id
-  private_subnet_ids         = module.network.private_subnet_ids
+  private_subnet_ids         = module.network.app_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   db_host                    = module.data_store.proxy_endpoint
   db_port                    = module.data_store.db_port

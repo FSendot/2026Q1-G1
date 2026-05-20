@@ -20,13 +20,13 @@ Hard constraints driving the design:
 
 | Component                              | Module             | Type      | Notes                                                                                                          |
 | -------------------------------------- | ------------------ | --------- | -------------------------------------------------------------------------------------------------------------- |
-| VPC, private subnets, VGW, default SG  | `modules/network`  | external + custom | Wraps `terraform-aws-modules/vpc/aws ~> 5.13`. No NAT, no IGW.                                          |
-| Gateway VPC Endpoints (S3, DynamoDB)   | `modules/network`  | custom    | Attached to all private route tables.                                                                          |
-| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs, SNS, Secrets Manager, Cognito IDP) | `modules/network` | custom | One shared SG (`<project>-endpoints-sg`) accepts HTTPS only from the VPC CIDR. Cognito IDP is used by the private API Lambda for password changes without a NAT gateway. |
+| VPC, three private subnet tiers, VGW, default SG | `modules/network`  | external + custom | Wraps `terraform-aws-modules/vpc/aws ~> 5.13`. **App** (`10.0.0.0/20`, `10.0.16.0/20`), **Data** (`10.0.32.0/20`, `10.0.48.0/20`), **Endpoints** (`10.0.64.0/20`, `10.0.80.0/20`). No NAT, no IGW. |
+| Gateway VPC Endpoints (S3, DynamoDB)   | `modules/network`  | custom    | Attached to **app** route tables only.                                                                         |
+| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs, SNS, Secrets Manager, Cognito IDP) | `modules/network` | custom | ENIs in **endpoint** subnets. Shared SG (`<project>-endpoints-sg`) accepts HTTPS from app subnet CIDRs + on-prem CIDR via VPN. VGW propagation on endpoint route tables only. |
 | SQS main queue + DLQ + redrive         | `modules/queue`      | custom    | `maxReceiveCount = 5`. SSE-SQS. Queue policy restricted to LabRole.                                            |
 | DynamoDB `user_behavior` table         | `modules/data_store` | custom    | PK `user_id` (string), `PAY_PER_REQUEST`, SSE on, PITR on. Input to scoring.                                   |
-| RDS PostgreSQL `fraud_results` DB      | `modules/data_store` | custom    | PostgreSQL 17.4, `db.t3.micro`, private subnets, encrypted. Output of scoring. Single-AZ lab configuration.    |
-| RDS Proxy                              | `modules/data_store` | custom    | Connection pool between Lambdas and RDS. `require_tls = true`, `iam_auth = DISABLED`, credentials via Secrets Manager. Prevents connection exhaustion on `db.t3.micro`.  |
+| RDS PostgreSQL `fraud_results` DB      | `modules/data_store` | custom    | PostgreSQL 17.4, `db.t3.micro`, **data** subnets, encrypted. Output of scoring. Single-AZ lab configuration.    |
+| RDS Proxy                              | `modules/data_store` | custom    | Connection pool between Lambdas and RDS in **data** subnets. `require_tls = true`, `iam_auth = DISABLED`, credentials via Secrets Manager. Prevents connection exhaustion on `db.t3.micro`.  |
 | SNS summary topic + alert SQS + summarizer | `modules/notification` | custom | Summary-only alerting path: fraud events accumulate in SQS, EventBridge triggers a Lambda every `fraud_alert_summary_interval_minutes`, and SNS emails one summary to confirmed subscribers. |
 | SQS results queue + DLQ                | `modules/results_writer` | custom | Direct buffer between the processor and writer Lambda. `maxReceiveCount = 3`, visibility timeout 180 s.                   |
 | Lambda results-writer                  | `modules/results_writer` | custom | Python 3.12, in VPC, triggered by SQS. Connects to RDS via RDS Proxy with a psycopg2 layer.     |
@@ -34,11 +34,53 @@ Hard constraints driving the design:
 | ECR repo                               | `modules/compute`  | custom    | `MUTABLE` tags, scan-on-push.                                                                                   |
 | ECS Cluster (Container Insights on)    | `modules/compute`  | custom    | Single cluster.                                                                                                 |
 | Fargate task definition                | `modules/compute`  | custom    | LabRole as both task and execution role (lab constraint).                                                       |
-| ECS service (2 tasks, private subnets) | `modules/compute`  | custom    | `assign_public_ip = false`, `lifecycle { ignore_changes = [desired_count] }` so autoscaling owns capacity.       |
+| ECS service (2 tasks, app subnets) | `modules/compute`  | custom    | `assign_public_ip = false`, deployed in **app** subnets, `lifecycle { ignore_changes = [desired_count] }` so autoscaling owns capacity.       |
 | Application Auto Scaling on queue depth | `modules/compute` | custom    | Target tracking with metric math (`messages / max(running, 1)`), step scaling fallback on raw `Visible` metric. |
 | On-prem simulated VPC + CGW + Site-to-Site VPN | `modules/onprem_sim` | custom + embedded CFN | Public-only `192.168.0.0/16` VPC with one EC2 strongSwan router (deployed via `aws_cloudformation_stack` consuming `templates/vpn-gateway-strongswan.yml`). BGP-based `aws_vpn_connection` against the VGW. Gated by `var.enable_onprem_sim` (default `true`). |
 | On-prem traffic producers (2× EC2) | `modules/onprem_sim` | custom | Two `aws_instance` resources (`producer-1`, `producer-2`) run a `systemd` service that continuously sends synthetic transactions to the ingestion SQS queue over VPN (~2,000 tx/min each by default). Gated by `var.enable_onprem_traffic_producers` (default `true`). |
-| Private DNS for SQS from on-prem + queue lockdown | `modules/onprem_sim`, `modules/queue` | custom | Route 53 PHZ `sqs.<region>.amazonaws.com` associated only with the on-prem VPC (apex A record points at the SQS VPCE private IPs); static route `<aws-vpc-cidr> → strongSwan ENI` on the on-prem route table; SQS queue policy `Deny` on `sqs:SendMessage` unless `aws:VpcSourceIp` is inside the on-prem CIDR — only the on-prem site can publish. |
+| Private DNS for SQS from on-prem + queue lockdown | `modules/onprem_sim`, `modules/queue` | custom | Route 53 PHZ `sqs.<region>.amazonaws.com` associated only with the on-prem VPC (apex A record points at the SQS VPCE private IPs in **endpoint** subnets); static route `<aws-vpc-cidr> → strongSwan ENI` on the on-prem route table; SQS queue policy `Deny` on `sqs:SendMessage` unless `aws:VpcSourceIp` is inside the on-prem CIDR — only the on-prem site can publish. |
+
+## 3.1 Subnet tiers (AWS VPC `10.0.0.0/16`)
+
+```mermaid
+flowchart TB
+  subgraph vpc [AWS_VPC_10_0_0_0_16]
+    subgraph appAzA [App_10_0_0_0_20]
+      ECS[ECS_Fargate]
+      LAM[Lambdas_x3]
+    end
+    subgraph appAzB [App_10_0_16_0_20]
+      ECS2[ECS_Fargate]
+    end
+    subgraph dataAzA [Data_10_0_32_0_20]
+      RDS[RDS_PostgreSQL]
+      PROXY[RDS_Proxy]
+    end
+    subgraph dataAzB [Data_10_0_48_0_20]
+      PROXY2[RDS_Proxy_ENI]
+    end
+    subgraph epAzA [Endpoints_10_0_64_0_20]
+      VPCE[Interface_VPCE_ENIs]
+    end
+    subgraph epAzB [Endpoints_10_0_80_0_20]
+      VPCE2[Interface_VPCE_ENIs]
+    end
+  end
+  OnPrem[OnPrem_producers] -->|VPN| VPCE
+  LAM -->|443| VPCE
+  ECS -->|443| VPCE
+  LAM -->|5432| PROXY
+  PROXY --> RDS
+  appAzA -->|GW_routes_S3_DDB| S3DDB[Gateway_VPCE]
+```
+
+| Tier | Route tables | Gateway VPCE | VGW propagation | Workloads |
+| ---- | ------------ | ------------ | --------------- | --------- |
+| App | Per-AZ app RT | S3, DynamoDB | No | ECS Fargate, Lambdas |
+| Data | Per-AZ data RT (isolated) | None | No | RDS, RDS Proxy |
+| Endpoints | Per-AZ endpoint RT | None | Yes (on-prem → SQS) | Interface VPCE ENIs |
+
+PostgreSQL access from app tier to data tier is enforced by **security groups** (Lambdas/ECS → RDS Proxy → RDS on tcp/5432), not by subnet isolation alone.
 
 ## 4. Data and control flow
 
@@ -59,7 +101,7 @@ Hard constraints driving the design:
 10. The dashboard Lambda (`modules/api`) is invoked by API Gateway (`GET /transactions`) and queries RDS via RDS Proxy to serve fraud results to the dashboard client.
 11. Dashboard invitations manage SNS email subscriptions: first successful activation requests a pending-confirmation subscription, and admin removal attempts unsubscribe after disabling access.
 
-There is **no public ingress** to the AWS VPC. The VGW is attached and route propagation is enabled. When `var.enable_onprem_sim = true` (default), `modules/onprem_sim` provisions a separate `192.168.0.0/16` VPC with one EC2 instance running strongSwan + Quagga BGP, plus the `aws_customer_gateway` and `aws_vpn_connection` that bring up two BGP-based IPsec tunnels against the VGW. The strongSwan EC2 itself is deployed by embedding `templates/vpn-gateway-strongswan.yml` inside an `aws_cloudformation_stack`, with PSKs delivered through AWS Secrets Manager.
+There is **no public ingress** to the AWS VPC. The VGW is attached and route propagation is enabled on **endpoint** route tables only (so on-prem can reach SQS VPCE ENIs). When `var.enable_onprem_sim = true` (default), `modules/onprem_sim` provisions a separate `192.168.0.0/16` VPC with one EC2 instance running strongSwan + Quagga BGP, plus the `aws_customer_gateway` and `aws_vpn_connection` that bring up two BGP-based IPsec tunnels against the VGW. The strongSwan EC2 itself is deployed by embedding `templates/vpn-gateway-strongswan.yml` inside an `aws_cloudformation_stack`, with PSKs delivered through AWS Secrets Manager.
 
 From the on-prem side, the SQS hostname `sqs.<region>.amazonaws.com` resolves privately to the AWS VPC's SQS Interface VPC Endpoint via a Route 53 Private Hosted Zone associated only with the on-prem VPC. A static route `<aws-vpc-cidr> → strongSwan ENI` on the on-prem route table funnels that traffic into the VPN tunnel. SQS itself rejects `sqs:SendMessage` whose `aws:VpcSourceIp` is not inside the on-prem CIDR (using `NotIpAddressIfExists`, which also denies callers that lack a VPC source IP — i.e. the public internet). The net result is that **only producers in the on-prem VPC can publish**, while Fargate consumers in the AWS VPC remain free to `ReceiveMessage` and `DeleteMessage`.
 
