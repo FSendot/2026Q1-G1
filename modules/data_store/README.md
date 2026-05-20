@@ -15,7 +15,7 @@ Provisions all persistent storage for the fraud-scoring system: a DynamoDB table
 
 ### RDS PostgreSQL — fraud results (scoring output)
 
-- `aws_db_subnet_group.results` — `<project>-results-db-subnet-group`. Spans all private subnets (≥2 AZs required by RDS, even for single-AZ deployments).
+- `aws_db_subnet_group.results` — `<project>-results-db-subnet-group`. Spans the data-tier subnets passed in `private_subnet_ids` (≥2 AZs required by RDS, even for single-AZ deployments).
 - `aws_security_group.rds` — `<project>-rds-sg`. No ingress rules are created inside this module; they are added in the root composition to avoid circular module dependencies.
 - `aws_db_instance.results` — `<project>-results-db`.
   - Engine: PostgreSQL 17.4, `db.t3.micro`, 20 GiB gp2.
@@ -55,7 +55,7 @@ Provisions all persistent storage for the fraud-scoring system: a DynamoDB table
 
 | Name                    | Description                                                                                                           |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `db_address`            | RDS hostname (no port). Use as `DB_HOST` in Lambda env vars.                                                          |
+| `db_address`            | Direct RDS hostname (no port). Lambdas should use `proxy_endpoint` as `DB_HOST`.                                      |
 | `db_port`               | RDS port (5432).                                                                                                      |
 | `db_name`               | Initial database name.                                                                                                |
 | `db_username`           | Master username.                                                                                                      |

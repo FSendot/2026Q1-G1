@@ -78,7 +78,7 @@ module "network" {
 
 - **External module**: `terraform-aws-modules/vpc/aws ~> 5.13`.
 - **Functions**: `cidrsubnet`, `format`, `merge`, `toset`, `replace`, `length`, `can`, `cidrhost`.
-- **Meta-arguments**: `for_each` (gateway and interface endpoints) and `validation` blocks on every input variable. `depends_on` and `lifecycle` will be added by `modules/compute` per the project plan.
+- **Meta-arguments**: `for_each` (gateway and interface endpoints), `check` (Cognito IDP subnet coverage), and `validation` blocks on every input variable.
 
 ## Notes for AWS Academy
 

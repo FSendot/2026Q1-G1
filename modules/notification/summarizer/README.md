@@ -11,4 +11,4 @@ Owns the scheduled Lambda infrastructure that runs the fraud-summary code from `
 
 ## Runtime
 
-The Python source is passed through `var.source_file` and packaged by `archive_file`. This submodule should stay infrastructure-only. The Lambda receives `FRAUD_ALERT_QUEUE_URL`, `SUMMARY_TOPIC_ARN`, `MAX_MESSAGES_PER_RUN`, and `SUMMARY_INTERVAL_MINUTES` as environment variables.
+The deployment zip is passed through `var.package_file` (built in the root composition from `app/notification/summarizer/handler.py`). This submodule should stay infrastructure-only. The Lambda receives `FRAUD_ALERT_QUEUE_URL`, `SUMMARY_TOPIC_ARN`, `MAX_MESSAGES_PER_RUN`, and `SUMMARY_INTERVAL_MINUTES` as environment variables.

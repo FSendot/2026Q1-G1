@@ -4,7 +4,7 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 
 ## Resources
 
-- `aws_ecr_repository.app` — `<project>/fraud-engine`. Image tag mutability `MUTABLE`, scan-on-push enabled, AES256 encryption (KMS-CMK skipped — AWS Academy).
+- `aws_ecr_repository.app` — `<project>/fraud-engine`. Image tag mutability `IMMUTABLE`, scan-on-push enabled, AES256 encryption (KMS-CMK skipped — AWS Academy).
 - `aws_cloudwatch_log_group.app` — `/ecs/<project>-fraud-engine`. Retention configurable via `log_retention_days`.
 - `aws_ecs_cluster.main` — `<project>-cluster`, `containerInsights = enabled`.
 - `aws_ecs_task_definition.app` — Fargate, awsvpc, X86_64/Linux. Both `task_role_arn` and `execution_role_arn` are passed in (LabRole in the lab). The container runs with `readonlyRootFilesystem = true`, `privileged = false`, and gets `AWS_REGION`, `QUEUE_URL`, `QUEUE_NAME`, `DYNAMODB_TABLE_NAME`, `RESULTS_QUEUE_URL`, `FRAUD_ALERT_QUEUE_URL`, `PROCESSOR_CONCURRENCY`, and `PROCESSOR_POLLERS` as env vars.

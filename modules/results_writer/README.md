@@ -27,7 +27,7 @@ The writer batches the full SQS invocation into a single database transaction, c
 | `vpc_id` | `string` | n/a | VPC where the Lambda is deployed. |
 | `private_subnet_ids` | `list(string)` | n/a | App-tier subnets for the Lambda VPC config. |
 | `endpoint_security_group_id` | `string` | n/a | VPC endpoint SG; the Lambda opens egress tcp/443 here. |
-| `db_host` | `string` | n/a | RDS hostname (`DB_HOST`). |
+| `db_host` | `string` | n/a | RDS Proxy endpoint hostname (`DB_HOST`). |
 | `db_port` | `number` | `5432` | RDS port (`DB_PORT`). |
 | `db_name` | `string` | `"fraud_results"` | Database name (`DB_NAME`). |
 | `db_username` | `string` | `"fraud_admin"` | Database user (`DB_USER`). |

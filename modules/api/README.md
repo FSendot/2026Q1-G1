@@ -1,6 +1,6 @@
 # `modules/api`
 
-Provisions the dashboard API: a Lambda function running inside the VPC (to reach the private RDS instance) exposed via an HTTP API Gateway. The routes are protected with a JWT authorizer backed by Cognito, and return fraud-scoring results stored in PostgreSQL.
+Provisions the dashboard API: a Lambda function running inside the VPC (to reach PostgreSQL via RDS Proxy) exposed via an HTTP API Gateway. The routes are protected with a JWT authorizer backed by Cognito, and return fraud-scoring results stored in PostgreSQL.
 
 ## Resources
 
@@ -29,7 +29,7 @@ Provisions the dashboard API: a Lambda function running inside the VPC (to reach
 | `vpc_id`                    | `string`       | n/a     | VPC where the Lambda is deployed.                                             |
 | `private_subnet_ids`        | `list(string)` | n/a     | App-tier subnets for the Lambda VPC config.                                    |
 | `endpoint_security_group_id`| `string`       | n/a     | VPC endpoint SG; the Lambda opens egress tcp/443 here (Logs endpoint).        |
-| `db_host`                   | `string`       | n/a     | RDS hostname (`DB_HOST` env var).                                             |
+| `db_host`                   | `string`       | n/a     | RDS Proxy endpoint hostname (`DB_HOST` env var).                              |
 | `db_port`                   | `number`       | `5432`  | RDS port (`DB_PORT` env var).                                                 |
 | `db_name`                   | `string`       | `"fraud_results"` | Database name (`DB_NAME` env var).                                  |
 | `db_username`               | `string`       | `"fraud_admin"` | Master username (`DB_USER` env var).                                    |
