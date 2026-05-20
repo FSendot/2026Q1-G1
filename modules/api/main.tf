@@ -1,7 +1,3 @@
-data "aws_kms_alias" "lambda" {
-  name = "alias/aws/lambda"
-}
-
 locals {
   module_tags = merge(var.tags, {
     Component = "api"
@@ -61,6 +57,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_endpoints" {
 }
 
 resource "aws_lambda_function" "api" {
+  # checkov:skip=CKV_AWS_173: AWS Academy no expone alias/aws/lambda; env vars usan cifrado por defecto del servicio.
   # checkov:skip=CKV_AWS_272: Code signing no configurado en lab académico.
   # checkov:skip=CKV_AWS_50: X-Ray tracing deshabilitado en lab.
   # checkov:skip=CKV_AWS_116: Lambda síncrona; DLQ no aplica (API Gateway reintenta a nivel HTTP).
@@ -71,7 +68,6 @@ resource "aws_lambda_function" "api" {
   timeout                        = 15
   memory_size                    = 256
   layers                         = [var.psycopg2_layer_arn]
-  kms_key_arn                    = data.aws_kms_alias.lambda.target_key_arn
   reserved_concurrent_executions = 3 # AWS Academy account cap is 10 concurrent Lambdas total
 
   filename         = var.package_file
