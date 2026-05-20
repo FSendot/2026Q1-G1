@@ -8,7 +8,6 @@ skip-check:
   - CKV_AWS_53
   - CKV_AWS_56
   - CKV_AWS_70    # Dashboard bucket policy allows public read
-  - CKV_AWS_157   # RDS Multi-AZ — lab cost
   - CKV_AWS_353   # RDS Performance Insights — lab cost
   - CKV_AWS_145   # S3 KMS default encryption — no CMK in Academy
   - CKV2_AWS_6    # Dashboard bucket public access block defaults
