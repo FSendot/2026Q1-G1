@@ -21,24 +21,13 @@ Para mantener una rama de entrega sincronizada con un repositorio/fork usado par
 
 ---
 
-## GitHub Actions
-
-Los workflows se lanzan manualmente en la pestaña **Actions** del repositorio. Algunos de ellos requieren una confirmación para ejecutar el workflow.
-
-
-| Workflow                   | Confirmación / inputs                                                                                                                                                         | Qué hace                                                                                                                                                                   |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Validate**               | —                                                                                                                                                                             | `terraform fmt -check`, `terraform validate`, build de artefactos Lambda necesarios para validar. No toca AWS.                                                             |
-| **Plan**                   | Escribir `plan`                                                                                                                                                               | `terraform plan` contra el state remoto; sube el artefacto `plan_output.txt`.                                                                                              |
-| **Deploy**                 | Escribir `deploy`                                                                                                                                                             | Deploy completo: processor en ECR, `terraform apply`, dashboard en S3, bootstrap de admin si hay `BOOTSTRAP_EMAIL`.                                                        |
-| **Destroy**                | Escribir `destroy`                                                                                                                                                            | `terraform destroy` de toda la infra gestionada.                                                                                                                           |
-| **Send test transactions** | `count` (Número de transacciones), `fraud_pct` (Porcentaje de transacciones con patrón de fraude), `concurrency` (Workers paralelos en el EC2 on-prem que envían lotes a SQS) | Ejecuta en el EC2 on-prem (vía SSM) un generador que encola un pico en el SQS de ingesta (cola e instancia se resuelven solas desde Terraform y el stack on-prem del lab). |
-
+## Pasos a seguir
 
 ### 1. Configurar secrets
 
 Dentro de Github, en el repositorio, en **Settings → Secrets and variables → Actions**, crear los siguientes secrets:
 
+![Settings → Secrets and variables → Actions](img/secrets_and_variables.png)
 
 | Secret                  | Obligatorio | Para qué                                                            |
 | ----------------------- | ----------- | ------------------------------------------------------------------- |
@@ -47,9 +36,6 @@ Dentro de Github, en el repositorio, en **Settings → Secrets and variables →
 | `AWS_SESSION_TOKEN`     | Sí          | Session Token del lab AWS Academy.                                  |
 | `BOOTSTRAP_EMAIL`       | Sí          | Email del primer administrador del dashboard.                       |
 | `BOOTSTRAP_PASSWORD`    | Sí          | Contraseña en Cognito para `BOOTSTRAP_EMAIL`. Ver requisitos abajo. |
-|                         |             |                                                                     |
-|                         |             |                                                                     |
-
 
 **Requisitos de `BOOTSTRAP_PASSWORD`**:
 
@@ -65,69 +51,87 @@ Dentro de Github, en el repositorio, en **Settings → Secrets and variables →
 
 **Valor recomendado** (cumple todas las reglas): `ItbaFraudLab2026!`
 
-### 2. Desplegar
+### 2. Workflows configurados
 
-1. (Opcional) **Actions → Plan** → Run workflow → escribir `plan` → esto genera el plan de ejecución de Terraform. Es opcional porque **Deploy** lo ejecuta automáticamente.
+Los workflows se lanzan manualmente en la pestaña **Actions** del repositorio. Algunos de ellos requieren una confirmación para ejecutar el workflow.
+
+![Pestaña Actions con los workflows del repositorio](img/workflows.png)
+
+| Workflow                   | Confirmación / inputs                                                                                                                                                         | Qué hace                                                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Deploy**                 | Escribir `deploy`                                                                                                                                                             | Deploy completo: processor en ECR, `terraform apply`, dashboard en S3, bootstrap de admin si hay `BOOTSTRAP_EMAIL`.                                                        |
+| **Destroy**                | Escribir `destroy`                                                                                                                                                            | `terraform destroy` de toda la infra gestionada.                                                                                                                           |
+| **Plan**                   | Escribir `plan`                                                                                                                                                               | `terraform plan` contra el state remoto; sube el artefacto `plan_output.txt`.                                                                                              |
+| **Send test transactions** | `count` (Número de transacciones), `fraud_pct` (Porcentaje de transacciones con patrón de fraude), `concurrency` (Workers paralelos en el EC2 on-prem que envían lotes a SQS) | Ejecuta en el EC2 on-prem (vía SSM) un generador que encola un pico en el SQS de ingesta (cola e instancia se resuelven solas desde Terraform y el stack on-prem del lab). |
+| **Validate**               | —                                                                                                                                                                             | `terraform fmt -check`, `terraform validate`, build de artefactos Lambda necesarios para validar. No toca AWS.                                                             |
+
+### 3. Desplegar
+
+1. En el caso de querer revisar el plan de ejecución de Terraform, se puede ejecutar el workflow **Actions → Plan** → Run workflow → escribir `plan` → esto genera el plan de ejecución de Terraform. Es opcional porque **Deploy** lo ejecuta automáticamente.
 2. **Actions → Deploy** → Run workflow → rama `main` → escribir `deploy`.
+
+   ![Workflow Deploy: Run workflow con confirmación deploy](img/deploy.png)
+
 3. Esperar el run en verde.
-4. Abrir el dashboard desde el **job summary** del run (*Deployment outputs* → `dashboard_url`).
+4. Abrir el dashboard desde el **job summary** del run (*Deployment outputs* → `dashboard_url`):
+
+   ![Job summary: sección Deployment outputs](img/dashboard_url_1.png)
+
+   ![Job summary: URL del dashboard (dashboard_url)](img/dashboard_url_2.png)
 
 **Deploy** ejecuta, en orden: preparación del modelo, build y push de la imagen del processor a ECR, `terraform apply`, publicación del dashboard en S3 y, si `BOOTSTRAP_EMAIL` está configurado, bootstrap automático del administrador (con `BOOTSTRAP_PASSWORD` si fue definido).
 
-### 3. Primer acceso al dashboard
+### 4. Primer acceso al dashboard
 
-Tras un **Deploy** exitoso, usar la URL HTTPS del job summary (`dashboard_url`). No usar el endpoint HTTP del website estático de S3: el flujo Cognito PKCE requiere HTTPS.
+Tras un **Deploy** exitoso, usar la URL HTTPS del job summary (`dashboard_url`).
 
+Al abrir `dashboard_url`, el sitio redirige a la pantalla de inicio de sesión:
 
-| Paso                     | Acción                                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
-| Iniciar sesión           | Cognito Hosted UI con el email de `BOOTSTRAP_EMAIL`.                                              |
-| Con `BOOTSTRAP_PASSWORD` | Login directo con la contraseña del secret.                                                       |
-| Sin `BOOTSTRAP_PASSWORD` | Completar el registro en Cognito con el mismo email; el bootstrap ya creó el acceso admin en RDS. |
-| Sin `BOOTSTRAP_EMAIL`    | Agregar el secret y volver a ejecutar **Deploy**.                                                 |
+![Pantalla de login del dashboard](img/login_page.png)
 
+Iniciar sesión con el email de `BOOTSTRAP_EMAIL` en la UI de cognito:
 
-- **Transaction User**: `user_id` de las transacciones financieras.
-- **Dashboard User**: persona autenticada en Cognito.
+![Cognito Hosted UI: sign in](img/cognito_sign_in.png)
 
-Cognito autentica; RDS autoriza vía `dashboard_access`. El admin bootstrap invita emails desde la pestaña **Invitaciones**; el invitado debe registrarse en Cognito con el mismo email.
+El admin bootstrap invita emails desde la pestaña **Invitaciones**. El invitado debe registrarse en Cognito con el mismo email.
 
-Para Google OAuth, registrar en Google Cloud el redirect URI:
+![Pestaña Invitaciones del dashboard](img/invitations.png)
 
-```text
-https://itba-fraud-auth-<account-id>.auth.us-east-1.amazoncognito.com/oauth2/idpresponse
-```
+En el caso de quererse registrar con un email que no fue invitado, al registrarse obtendrá un error de acceso a la plataforma.
 
-### 4. Probar el flujo
-
-
-| Paso                           | Workflow                                                                                                   |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Enviar transacciones de prueba | **Send test transactions** (infra desplegada; simulación on-prem habilitada por defecto en la composición) |
-| Ver el dashboard               | `dashboard_url` en el job summary de **Deploy**                                                            |
-| Tráfico continuo on-prem       | Automático: 2 productores EC2 (~50 tx/min total, ~8 % patrón de fraude)                                    |
-| Resúmenes por email            | Cada `fraud_alert_summary_interval_minutes` (default 7); hasta 500 alertas por envío                       |
-
+### 5. Probar el flujo
 
 **Send test transactions** — inputs del workflow:
 
+![Workflow Send test transactions: inputs count, fraud_pct y concurrency](img/send_test_transactions.png)
 
 | Input         | Default | Para qué se usa                                                                                                                 |
 | ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `count`       | `50000` | Total de transacciones sintéticas que el generador intenta encolar en SQS durante el pico.                                      |
-| `fraud_pct`   | `8`     | Porcentaje de esas transacciones generadas con patrón de fraude (el resto son normales).                                        |
-| `concurrency` | `128`   | Cantidad de workers paralelos en el EC2 que envían lotes a SQS; más valor = pico más rápido (más carga en el EC2 y en la cola). |
+| `count`       | `50000` | Total de transacciones sintéticas que el generador intenta encolar en SQS.                                      |
+| `fraud_pct`   | `8`     | Porcentaje de esas transacciones generadas con patrón de fraude (el resto son permitidas).                                        |
+| `concurrency` | `128`   | Cantidad de workers paralelos en el EC2 que envían lotes a SQS. |
 
+Tras procesar transacciones (tráfico on-prem o **Send test transactions**), el dashboard muestra métricas y el detalle:
 
-Región (`us-east-1`), cola de ingesta (`terraform output queue_url`) e instancia on-prem (`VpnGatewayInstanceId` del stack `itba-tp-fraud-onprem-strongswan`) están fijados por el lab y no se exponen como inputs del workflow.
+![Vista general del dashboard](img/dashboard_overview.png)
 
-Patrones generados: transacciones **normales** (usuarios recurrentes, montos bajos/medios) y **fraude** (account drain, country shift, card testing, etc.).
+![Listado de transacciones](img/transactions_overview.png)
 
-### 5. Destruir al terminar el lab
+![Detalle de un usuario (transacciones y perfil)](img/users_detail.png)
+
+**Alertas por email (SNS):** al desplegar, SNS envía un correo de confirmación de suscripción al email de `BOOTSTRAP_EMAIL`. Hay que confirmar la suscripción para recibir los resúmenes de fraude.
+
+![Confirmación de suscripción SNS](img/suscription_confirmation.png)
+
+Cada 7 minutos llega un resumen con las alertas detectadas:
+
+![Email de resumen de fraudes](img/email.png)
+
+### 6. Destruir al terminar el lab
 
 **Actions → Destroy** → Run workflow → escribir `destroy`.
 
-El bucket de state S3 `itba-tp-fraud-tfstate-<account-id>` **no** se elimina con **Destroy**.
+El bucket de state S3 `itba-tp-fraud-tfstate-<account-id>` **no** se elimina con **Destroy**, es lo único que restaría eliminar a mano.
 
 ---
 
