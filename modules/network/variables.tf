@@ -19,7 +19,7 @@ variable "vpc_cidr" {
 }
 
 variable "azs" {
-  description = "Lista de Availability Zones donde se crean subnets privadas. Se requieren al menos dos para alta disponibilidad."
+  description = "Lista de Availability Zones donde se crean las tres capas de subnets privadas (app, data, endpoints). Se requieren al menos dos para alta disponibilidad."
   type        = list(string)
 
   validation {

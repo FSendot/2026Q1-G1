@@ -26,7 +26,7 @@ The processor publishes all scoring results directly to `modules/results_writer`
 | `tags`                             | `map(string)`  | `{}`    | Common tags merged with notification component tags. |
 | `principal_arn`                    | `string`       | n/a     | LabRole ARN used to operate SNS/SQS and execute the Lambda. |
 | `vpc_id`                           | `string`       | n/a     | VPC where the summarizer Lambda runs. |
-| `private_subnet_ids`               | `list(string)` | n/a     | Private subnets for the summarizer Lambda. |
+| `private_subnet_ids`               | `list(string)` | n/a     | App-tier subnets for the summarizer Lambda. |
 | `endpoint_security_group_id`       | `string`       | n/a     | Interface endpoint SG for Lambda egress to Logs, SQS, and SNS. |
 | `summarizer_package_file`          | `string`       | n/a     | Path to the pre-built summarizer Lambda zip (from `app/notification/summarizer/handler.py` at root). |
 | `summary_interval_minutes`         | `number`       | `7`     | EventBridge schedule interval for summary publication. Root passes `var.fraud_alert_summary_interval_minutes`. |
@@ -56,7 +56,7 @@ module "notification" {
   project                    = local.project
   principal_arn              = data.aws_iam_role.lab.arn
   vpc_id                     = module.network.vpc_id
-  private_subnet_ids         = module.network.private_subnet_ids
+  private_subnet_ids         = module.network.app_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   summarizer_package_file    = data.archive_file.notification_summarizer.output_path
   summary_interval_minutes   = var.fraud_alert_summary_interval_minutes

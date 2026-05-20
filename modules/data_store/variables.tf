@@ -43,7 +43,7 @@ variable "vpc_id" {
 }
 
 variable "private_subnet_ids" {
-  description = "IDs de las subnets privadas que forman el DB subnet group. Se requieren al menos 2 AZs."
+  description = "IDs de las subnets privadas de datos que forman el DB subnet group y alojan RDS Proxy. Se requieren al menos 2 AZs."
   type        = list(string)
 
   validation {

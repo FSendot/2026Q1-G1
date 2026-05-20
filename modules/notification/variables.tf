@@ -30,7 +30,7 @@ variable "vpc_id" {
 }
 
 variable "private_subnet_ids" {
-  description = "IDs de las subnets privadas donde se despliega la Lambda summarizer."
+  description = "IDs de las subnets privadas de aplicación donde se despliega la Lambda summarizer."
   type        = list(string)
 
   validation {

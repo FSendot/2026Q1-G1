@@ -67,7 +67,7 @@ module "data_store" {
 
   project            = local.project
   vpc_id             = module.network.vpc_id
-  private_subnet_ids = module.network.private_subnet_ids
+  private_subnet_ids = module.network.data_subnet_ids
   db_password        = random_password.db.result
   principal_arn      = data.aws_iam_role.lab.arn
   tags               = local.common_tags
@@ -80,7 +80,7 @@ module "compute" {
   tags    = local.common_tags
 
   vpc_id                     = module.network.vpc_id
-  private_subnet_ids         = module.network.private_subnet_ids
+  private_subnet_ids         = module.network.app_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
 
   task_role_arn      = data.aws_iam_role.lab.arn
@@ -128,7 +128,7 @@ module "notification" {
   project                    = local.project
   principal_arn              = data.aws_iam_role.lab.arn
   vpc_id                     = module.network.vpc_id
-  private_subnet_ids         = module.network.private_subnet_ids
+  private_subnet_ids         = module.network.app_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   summarizer_package_file    = data.archive_file.notification_summarizer.output_path
   dashboard_url              = local.dashboard_app_url
@@ -142,7 +142,7 @@ module "results_writer" {
   project                     = local.project
   principal_arn               = data.aws_iam_role.lab.arn
   vpc_id                      = module.network.vpc_id
-  private_subnet_ids          = module.network.private_subnet_ids
+  private_subnet_ids          = module.network.app_subnet_ids
   endpoint_security_group_id  = module.network.endpoint_security_group_id
   db_host                     = module.data_store.proxy_endpoint
   db_port                     = module.data_store.db_port
@@ -172,7 +172,7 @@ module "api" {
   project                    = local.project
   principal_arn              = data.aws_iam_role.lab.arn
   vpc_id                     = module.network.vpc_id
-  private_subnet_ids         = module.network.private_subnet_ids
+  private_subnet_ids         = module.network.app_subnet_ids
   endpoint_security_group_id = module.network.endpoint_security_group_id
   psycopg2_layer_arn         = aws_lambda_layer_version.psycopg2.arn
   db_host                    = module.data_store.proxy_endpoint

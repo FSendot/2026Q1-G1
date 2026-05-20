@@ -33,7 +33,7 @@ Provisions all persistent storage for the fraud-scoring system: a DynamoDB table
 | `enable_point_in_time_recovery` | `bool`         | `true`            | Toggle PITR for the DynamoDB table.                                               |
 | `enable_deletion_protection`    | `bool`         | `false`           | Toggle DynamoDB deletion protection.                                              |
 | `vpc_id`                        | `string`       | n/a               | VPC where the RDS instance is deployed.                                           |
-| `private_subnet_ids`            | `list(string)` | n/a               | Private subnet IDs for the DB subnet group (≥2 required).                        |
+| `private_subnet_ids`            | `list(string)` | n/a               | Data-tier subnet IDs for the DB subnet group and RDS Proxy (≥2 required).                        |
 | `instance_class`                | `string`       | `"db.t3.micro"`   | RDS instance class.                                                               |
 | `db_name`                       | `string`       | `"fraud_results"` | Initial database name in PostgreSQL.                                              |
 | `db_username`                   | `string`       | `"fraud_admin"`   | Master username for the RDS instance.                                             |
@@ -74,7 +74,7 @@ module "data_store" {
   project            = local.project
   principal_arn      = data.aws_iam_role.lab.arn
   vpc_id             = module.network.vpc_id
-  private_subnet_ids = module.network.private_subnet_ids
+  private_subnet_ids = module.network.data_subnet_ids
   db_password        = random_password.db.result
   tags               = local.common_tags
 }
