@@ -49,9 +49,8 @@ module "network" {
   tags                             = local.common_tags
 }
 
-# Cuando la simulación on-premise está activa, la cola sólo acepta
-# SendMessage desde la VPC on-premise (vía aws:SourceVpc), que funciona
-# tanto para tráfico intra-VPC como cross-VPC via VPN.
+# La cola autoriza LabRole; el acceso privado desde on-prem queda acotado por
+# VPN Site-to-Site, DNS privado hacia el VPCE de SQS y el SG del endpoint.
 module "queue" {
   source = "./modules/queue"
 

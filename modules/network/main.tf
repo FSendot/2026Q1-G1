@@ -66,6 +66,13 @@ module "vpc" {
   }
 }
 
+resource "aws_vpn_gateway_route_propagation" "endpoint_route_tables" {
+  for_each = toset(module.vpc.intra_route_table_ids)
+
+  route_table_id = each.value
+  vpn_gateway_id = module.vpc.vgw_id
+}
+
 data "aws_vpc_endpoint_service" "cognito_idp" {
   service = "cognito-idp"
 }
