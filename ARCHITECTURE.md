@@ -1,46 +1,50 @@
-# Architecture — Asynchronous Fraud-Scoring Engine
+# Arquitectura — Motor de scoring de fraude asíncrono
 
-This document describes the **target architecture** provisioned by this repository, the **trade-offs**, and the **explicit non-goals** of the current iteration. The Terraform composition is the single source of truth; this document only summarizes intent.
-
-
-
-## 1. Context
-
-The system scores incoming financial transactions for fraud asynchronously. Producers (out of scope of this repo) drop transactions on a queue; a horizontally-scaled pool of containers reads them, enriches each one with the user's recent behaviour from a key-value store, runs a scoring model, and writes the outcome.
-
-Hard constraints driving the design:
-
-- **AWS Academy** lab: short-lived account, no permission to create new IAM users/roles. Workloads must reuse `LabRole`.
-- Reproducibility: every cloud change must live in code; no console clicks.
-- Cost: the lab account is small. We avoid NAT gateways, customer-managed KMS keys, and multi-region setups.
+Este documento describe la **arquitectura objetivo** provisionada por este repositorio, los **trade-offs** y los **no-objetivos explícitos** de la iteración actual. La composición Terraform es la única fuente de verdad; este documento solo resume la intención.
 
 
 
-## 3. Components
+## 1. Contexto
 
-| Component                              | Module             | Type      | Notes                                                                                                          |
+El sistema puntúa transacciones financieras entrantes en busca de fraude de forma asíncrona. Los productores (fuera del alcance de este repo) depositan transacciones en una cola; un pool de contenedores escalado horizontalmente las lee, enriquece cada una con el comportamiento reciente del usuario desde un almacén clave-valor, ejecuta un modelo de scoring y persiste el resultado.
+
+Restricciones duras que guían el diseño:
+
+- **Lab AWS Academy**: cuenta efímera, sin permiso para crear usuarios/roles IAM nuevos. Las cargas de trabajo deben reutilizar `LabRole`.
+- Reproducibilidad: todo cambio en la nube debe vivir en código; nada por consola.
+- Costo: la cuenta del lab es acotada. Evitamos NAT gateways, claves KMS administradas por el cliente y despliegues multi-región.
+
+
+
+## 2. Componentes
+
+| Componente                             | Módulo             | Tipo      | Notas                                                                                                          |
 | -------------------------------------- | ------------------ | --------- | -------------------------------------------------------------------------------------------------------------- |
-| VPC, three private subnet tiers, VGW, default SG | `modules/network`  | external + custom | Wraps `terraform-aws-modules/vpc/aws ~> 5.13`. **App** (`10.0.0.0/20`, `10.0.16.0/20`), **Data** (`10.0.32.0/20`, `10.0.48.0/20`), **Endpoints** (`10.0.64.0/20`, `10.0.80.0/20`). No NAT, no IGW. |
-| Gateway VPC Endpoints (S3, DynamoDB)   | `modules/network`  | custom    | Attached to **app** route tables only.                                                                         |
-| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs, SNS, Secrets Manager, Cognito IDP) | `modules/network` | custom | ENIs in **endpoint** subnets. Shared SG (`<project>-endpoints-sg`) accepts HTTPS from app subnet CIDRs + on-prem CIDR via VPN. VGW propagation on endpoint route tables only. |
-| SQS main queue + DLQ + redrive         | `modules/queue`      | custom    | `maxReceiveCount = 5`. SSE-SQS. Queue policy restricted to LabRole.                                            |
-| DynamoDB `user_behavior` table         | `modules/data_store` | custom    | PK `user_id` (string), `PAY_PER_REQUEST`, SSE on, PITR on. Input to scoring.                                   |
-| RDS PostgreSQL `fraud_results` DB      | `modules/data_store` | custom    | PostgreSQL 17.4, `db.t3.micro`, **data** subnets, encrypted. Output of scoring. Single-AZ lab configuration.    |
-| RDS Proxy                              | `modules/data_store` | custom    | Connection pool between Lambdas and RDS in **data** subnets. `require_tls = true`, `iam_auth = DISABLED`, credentials via Secrets Manager. Prevents connection exhaustion on `db.t3.micro`.  |
-| SNS summary topic + alert SQS + summarizer | `modules/notification` | custom | Summary-only alerting path: fraud events accumulate in SQS, EventBridge triggers a Lambda every `fraud_alert_summary_interval_minutes`, and SNS emails one summary to confirmed subscribers. |
-| SQS results queue + DLQ                | `modules/results_writer` | custom | Direct buffer between the processor and writer Lambda. `maxReceiveCount = 3`, visibility timeout 180 s.                   |
-| Lambda results-writer                  | `modules/results_writer` | custom | Python 3.12, in VPC, triggered by SQS. Connects to RDS via RDS Proxy with a psycopg2 layer.     |
-| HTTP API Gateway + Lambda              | `modules/api`        | custom    | `GET /transactions`, `GET /stats`, `GET /health`. Lambda in VPC reaches RDS via RDS Proxy. Stays serverless instead of an always-running Fargate service. |
-| ECR repo                               | `modules/compute`  | custom    | `MUTABLE` tags, scan-on-push.                                                                                   |
-| ECS Cluster (Container Insights on)    | `modules/compute`  | custom    | Single cluster.                                                                                                 |
-| Fargate task definition                | `modules/compute`  | custom    | LabRole as both task and execution role (lab constraint).                                                       |
-| ECS service (2 tasks, app subnets) | `modules/compute`  | custom    | `assign_public_ip = false`, deployed in **app** subnets, `lifecycle { ignore_changes = [desired_count] }` so autoscaling owns capacity.       |
-| Application Auto Scaling on queue depth | `modules/compute` | custom    | Target tracking with metric math (`messages / max(running, 1)`), step scaling fallback on raw `Visible` metric. |
-| On-prem simulated VPC + CGW + Site-to-Site VPN | `modules/onprem_sim` | custom + embedded CFN | Public-only `192.168.0.0/16` VPC with one EC2 strongSwan router (deployed via `aws_cloudformation_stack` consuming `templates/vpn-gateway-strongswan.yml`). BGP-based `aws_vpn_connection` against the VGW. Gated by `var.enable_onprem_sim` (default `true`). |
-| On-prem traffic producers (2× EC2) | `modules/onprem_sim` | custom | Two `aws_instance` resources (`producer-1`, `producer-2`) run a `systemd` service that continuously sends synthetic transactions to the ingestion SQS queue over VPN (~2,000 tx/min each by default). Gated by `var.enable_onprem_traffic_producers` (default `true`). |
-| Private DNS for SQS from on-prem + queue lockdown | `modules/onprem_sim`, `modules/queue` | custom | Route 53 PHZ `sqs.<region>.amazonaws.com` associated only with the on-prem VPC (apex A record points at the SQS VPCE private IPs in **endpoint** subnets); static route `<aws-vpc-cidr> → strongSwan ENI` on the on-prem route table; SQS queue policy `Deny` on `sqs:SendMessage` unless `aws:VpcSourceIp` is inside the on-prem CIDR — only the on-prem site can publish. |
+| VPC, tres niveles de subnets privadas, VGW, SG por defecto | `modules/network`  | externo + custom | Envuelve `terraform-aws-modules/vpc/aws ~> 5.13`. **App** (`10.0.0.0/20`, `10.0.16.0/20`), **Data** (`10.0.32.0/20`, `10.0.48.0/20`), **Endpoints** (`10.0.64.0/20`, `10.0.80.0/20`). Sin NAT ni IGW. `propagate_private_route_tables_vgw = true` en las route tables de app. |
+| Gateway VPC Endpoints (S3, DynamoDB)   | `modules/network`  | custom    | Asociados solo a las route tables de **app**.                                                                  |
+| Interface VPC Endpoints (SQS, ECR-API, ECR-DKR, Logs, SNS, Secrets Manager) | `modules/network` | custom | ENIs en subnets de **endpoints**. SG compartido (`<project>-endpoints-sg`) acepta HTTPS desde CIDRs de app + CIDR on-prem vía VPN. |
+| Interface VPC Endpoint Cognito IDP     | `modules/network`  | custom    | Endpoint separado en subnets de endpoints cuya AZ soporta el servicio (`private_dns_enabled = true`).          |
+| Cola SQS principal + DLQ + redrive     | `modules/queue`      | custom    | `maxReceiveCount = 5`. SSE-SQS. Política de cola: publicar/consumir con `LabRole` + `DenyInsecureTransport`. La ingesta queda restringida a on-prem **arquitecturalmente** (VPN + Interface VPCE + SG de endpoints); se eliminaron condiciones `aws:VpcSourceIp` / `aws:SourceVpc` porque no se propagan en tráfico VPN cross-VPC hacia un Interface VPCE. |
+| Tabla DynamoDB `user_behavior`         | `modules/data_store` | custom    | PK `user_id` (string), `PAY_PER_REQUEST`, SSE activo, PITR activo. Entrada del scoring.                      |
+| Bucket S3 de auditoría                 | `modules/data_store` | custom    | Bucket privado para JSON de auditoría opcional por transacción desde el processor Fargate (`S3_AUDIT_BUCKET`). SSE-S3, versionado, lifecycle de 90 días. |
+| RDS PostgreSQL `fraud_results`         | `modules/data_store` | custom    | PostgreSQL 17.4, `db.t3.micro`, subnets de **data**, cifrado. Salida del scoring. Configuración single-AZ de lab. |
+| RDS Proxy                              | `modules/data_store` | custom    | Pool de conexiones entre Lambdas y RDS en subnets de **data**. `require_tls = true`, `iam_auth = DISABLED`, credenciales vía Secrets Manager. Evita agotar conexiones en `db.t3.micro`. |
+| Tópico SNS de resumen + cola SQS de alertas + summarizer | `modules/notification` | custom | Alertas solo por resumen: eventos de fraude se acumulan en SQS, EventBridge dispara una Lambda cada `fraud_alert_summary_interval_minutes` (default 7) y SNS envía un email de resumen a suscriptores confirmados. |
+| Cola SQS de resultados + DLQ           | `modules/results_writer` | custom | Buffer directo entre el processor y la Lambda writer. `maxReceiveCount = 3`, visibility timeout 360 s (≥ 6× timeout de Lambda). |
+| Lambda results-writer                  | `modules/results_writer` | custom | Go (`provided.al2023`, handler `bootstrap`), en VPC, disparada por SQS. Conecta a RDS vía RDS Proxy.          |
+| HTTP API Gateway + Lambda              | `modules/api`        | custom    | Autorizador JWT (Cognito). Rutas: `GET /health`, `GET /stats`, `GET /stats/timeseries`, `GET /filters`, `GET /transactions`, `GET /transactions/{id}`, `GET /users`, `GET /users/{id}` y `/dashboard/*` (perfil, contraseña, invitaciones). Lambda en VPC llega a RDS vía RDS Proxy con capa psycopg2. |
+| Cognito User Pool + Hosted UI          | `modules/auth`       | custom    | Inicio de sesión por email, app client PKCE, dominio `itba-fraud-auth-<account-id>`. Google OAuth opcional si están configurados los secrets `GOOGLE_OAUTH_*`. Acceso fino al dashboard en RDS (tabla `dashboard_access`, gestionada por la Lambda API). |
+| Sitio web del dashboard en S3          | `modules/dashboard`  | custom    | Bucket de sitio estático público; Terraform sube `index.html`, `app.js` y `config.js` templado (API + Cognito). El workflow **Deploy** sincroniza el export estático con `aws s3 sync`. |
+| Repositorio ECR                        | `modules/compute`  | custom    | Tags `IMMUTABLE`, scan-on-push.                                                                                |
+| Cluster ECS (Container Insights activo)| `modules/compute`  | custom    | Un solo cluster.                                                                                               |
+| Task definition Fargate                | `modules/compute`  | custom    | Imagen del processor en Go. `LabRole` como task role y execution role (restricción del lab).                   |
+| Servicio ECS (2 tasks, subnets app)    | `modules/compute`  | custom    | `assign_public_ip = false`, desplegado en subnets de **app**, `lifecycle { ignore_changes = [desired_count] }` para que el autoscaling controle la capacidad. |
+| Application Auto Scaling por profundidad de cola | `modules/compute` | custom | Target tracking con metric math (`messages / max(running, 1)`), step scaling de respaldo sobre la métrica `Visible`. Escala entre `min_capacity` (default 1) y `max_capacity` (default 10). |
+| VPC on-prem simulada + CGW + VPN Site-to-Site | `modules/onprem_sim` | custom + CFN embebido | VPC `192.168.0.0/16` solo pública con un router EC2 strongSwan (desplegado vía `aws_cloudformation_stack` con `templates/vpn-gateway-strongswan.yml`). `aws_vpn_connection` con BGP contra el VGW. Controlado por `var.enable_onprem_sim` (default `true`). |
+| Productores de tráfico on-prem (2× EC2) | `modules/onprem_sim` | custom | Dos recursos `aws_instance` (`producer-1`, `producer-2`) ejecutan un servicio `systemd` que envía transacciones sintéticas de forma continua a la cola SQS de ingesta por VPN (~25 tx/min cada uno por defecto: batch 5 cada 12 s → ~50 tx/min total). Controlado por `var.enable_onprem_traffic_producers` (default `true`). |
+| DNS privado de SQS desde on-prem       | `modules/onprem_sim` | custom    | PHZ Route 53 `sqs.<region>.amazonaws.com` asociada solo a la VPC on-prem (registro A apex apunta a IPs privadas del VPCE SQS en subnets de **endpoints**); ruta estática `<aws-vpc-cidr> → ENI strongSwan` en la route table on-prem. |
 
-## 3.1 Subnet tiers (AWS VPC `10.0.0.0/16`)
+## 2.1 Niveles de subnets (VPC AWS `10.0.0.0/16`)
 
 ```mermaid
 flowchart TB
@@ -66,60 +70,64 @@ flowchart TB
       VPCE2[Interface_VPCE_ENIs]
     end
   end
-  OnPrem[OnPrem_producers] -->|VPN| VPCE
+  OnPrem[Productores_on_prem] -->|VPN| VPCE
   LAM -->|443| VPCE
   ECS -->|443| VPCE
   LAM -->|5432| PROXY
   PROXY --> RDS
-  appAzA -->|GW_routes_S3_DDB| S3DDB[Gateway_VPCE]
+  appAzA -->|Rutas_GW_S3_DDB| S3DDB[Gateway_VPCE]
 ```
 
-| Tier | Route tables | Gateway VPCE | VGW propagation | Workloads |
-| ---- | ------------ | ------------ | --------------- | --------- |
-| App | Per-AZ app RT | S3, DynamoDB | No | ECS Fargate, Lambdas |
-| Data | Per-AZ data RT (isolated) | None | No | RDS, RDS Proxy |
-| Endpoints | Per-AZ endpoint RT | None | Yes (on-prem → SQS) | Interface VPCE ENIs |
+| Nivel | Route tables | Gateway VPCE | Propagación VGW | Cargas de trabajo |
+| ----- | ------------ | ------------ | --------------- | ----------------- |
+| App | RT app por AZ | S3, DynamoDB | Sí (`propagate_private_route_tables_vgw`) | ECS Fargate, Lambdas (API, results-writer, summarizer) |
+| Data | RT data por AZ (aisladas) | Ninguno | No | RDS, RDS Proxy |
+| Endpoints | RT endpoints por AZ | Ninguno | No (default) | ENIs de Interface VPCE |
 
-PostgreSQL access from app tier to data tier is enforced by **security groups** (Lambdas/ECS → RDS Proxy → RDS on tcp/5432), not by subnet isolation alone.
+El acceso a PostgreSQL desde el nivel app al nivel data se impone con **security groups** (Lambdas/ECS → RDS Proxy → RDS en tcp/5432), no solo por aislamiento de subnets.
 
-## 4. Data and control flow
+## 3. Flujo de datos y control
 
-**Ingestion and scoring:**
+**Ingesta y scoring:**
 
-1. Two dedicated on-prem EC2 producers (`producer-1`, `producer-2`) call `SendMessageBatch` on the SQS main queue using the SQS Interface VPC Endpoint over the VPN. Each runs a `systemd` unit that loops indefinitely (~200 messages every 6 seconds by default). The strongSwan router only terminates IPsec; `scripts/send_test_transactions.py` remains available for optional burst tests via SSM.
-2. Fargate tasks consume from the queue, look up the user's behaviour features in DynamoDB via the DynamoDB Gateway Endpoint, run the scoring model, and send every result to the results SQS queue.
-3. Failures on the ingestion queue are retried via SQS visibility timeout. After `maxReceiveCount = 5` deliveries, the message moves to the ingestion DLQ.
-4. CloudWatch Logs receives container logs through the Logs Interface Endpoint.
-5. ECR holds the container image, pulled through ECR API + DKR Endpoints.
-6. Application Auto Scaling reads the queue depth and the running task count and adjusts `desired_count` so the queue stays close to the target backlog per task.
+1. Dos productores EC2 on-prem dedicados (`producer-1`, `producer-2`) llaman `SendMessage` / `SendMessageBatch` en la cola SQS principal usando el Interface VPC Endpoint de SQS por la VPN. Cada uno ejecuta una unidad `systemd` en bucle indefinido (defaults: 5 mensajes cada 12 s → ~25 tx/min por productor). El router strongSwan solo termina IPsec. Para carga adicional en ráfaga, el workflow de GitHub Actions **Send test transactions** ejecuta `scripts/send_test_transactions.py` en un productor on-prem vía SSM.
+2. Las tasks Fargate (processor Go) consumen de la cola, consultan features de comportamiento del usuario en DynamoDB vía Gateway Endpoint de DynamoDB, ejecutan el runtime ML de scoring (con fallback a reglas), opcionalmente escriben JSON de auditoría en S3, actualizan el perfil del usuario en DynamoDB y envían cada resultado a la cola SQS de resultados.
+3. Los fallos en la cola de ingesta se reintentan con el visibility timeout de SQS. Tras `maxReceiveCount = 5` entregas, el mensaje pasa a la DLQ de ingesta.
+4. CloudWatch Logs recibe logs de contenedores por el Interface Endpoint de Logs.
+5. ECR almacena la imagen de contenedor, descargada por los Endpoints ECR API + DKR.
+6. Application Auto Scaling lee la profundidad de la cola y la cantidad de tasks en ejecución y ajusta `desired_count` para mantener el backlog objetivo por task.
 
-**Post-analysis and notification summaries:**
+**Post-análisis, dashboard y resúmenes de notificación:**
 
-7. The results-writer Lambda is triggered by the SQS event source mapping and writes each fraud result to RDS PostgreSQL via RDS Proxy (`modules/data_store`).
-8. If a scored transaction is fraudulent, the processor also sends it to the fraud-alert SQS queue (`modules/notification`).
-9. The scheduled summarizer Lambda drains pending fraud alerts, publishes one compact SNS summary, and deletes messages only after `sns:Publish` succeeds.
-10. The dashboard Lambda (`modules/api`) is invoked by API Gateway (`GET /transactions`) and queries RDS via RDS Proxy to serve fraud results to the dashboard client.
-11. Dashboard invitations manage SNS email subscriptions: first successful activation requests a pending-confirmation subscription, and admin removal attempts unsubscribe after disabling access.
+7. La Lambda results-writer se dispara con el event source mapping de SQS y escribe cada resultado de fraude en RDS PostgreSQL vía RDS Proxy (`modules/data_store`).
+8. Si una transacción puntuada es fraudulenta, el processor también la envía a la cola SQS de alertas de fraude (`modules/notification`).
+9. La Lambda summarizer programada drena alertas de fraude pendientes, publica un resumen compacto en SNS y borra mensajes solo después de que `sns:Publish` tenga éxito.
+10. La Lambda del dashboard (`modules/api`) es invocada por API Gateway con un JWT de Cognito y consulta RDS vía RDS Proxy para servir resultados de fraude, perfiles de usuario y control de acceso al dashboard.
+11. El dashboard estático (`modules/dashboard`) se carga desde S3, autentica usuarios con Cognito Hosted UI y llama a la API con el access token. La creación del admin bootstrap corre en el workflow **Deploy** cuando está configurado `BOOTSTRAP_EMAIL`.
+12. Las invitaciones del dashboard gestionan suscripciones email de SNS: la primera activación exitosa solicita una suscripción pendiente de confirmación, y la eliminación por admin intenta desuscribir después de deshabilitar el acceso.
 
-There is **no public ingress** to the AWS VPC. The VGW is attached and route propagation is enabled on **endpoint** route tables only (so on-prem can reach SQS VPCE ENIs). When `var.enable_onprem_sim = true` (default), `modules/onprem_sim` provisions a separate `192.168.0.0/16` VPC with one EC2 instance running strongSwan + Quagga BGP, plus the `aws_customer_gateway` and `aws_vpn_connection` that bring up two BGP-based IPsec tunnels against the VGW. The strongSwan EC2 itself is deployed by embedding `templates/vpn-gateway-strongswan.yml` inside an `aws_cloudformation_stack`, with PSKs delivered through AWS Secrets Manager.
+**No hay ingress público** hacia las cargas de la VPC AWS. El dashboard y API Gateway son las únicas superficies públicas (sitio S3 + HTTP API regional).
 
-From the on-prem side, the SQS hostname `sqs.<region>.amazonaws.com` resolves privately to the AWS VPC's SQS Interface VPC Endpoint via a Route 53 Private Hosted Zone associated only with the on-prem VPC. A static route `<aws-vpc-cidr> → strongSwan ENI` on the on-prem route table funnels that traffic into the VPN tunnel. SQS itself rejects `sqs:SendMessage` whose `aws:VpcSourceIp` is not inside the on-prem CIDR (using `NotIpAddressIfExists`, which also denies callers that lack a VPC source IP — i.e. the public internet). The net result is that **only producers in the on-prem VPC can publish**, while Fargate consumers in the AWS VPC remain free to `ReceiveMessage` and `DeleteMessage`.
+Cuando `var.enable_onprem_sim = true` (default), `modules/onprem_sim` provisiona una VPC separada `192.168.0.0/16` con una instancia EC2 que corre strongSwan + Quagga BGP, más el `aws_customer_gateway` y el `aws_vpn_connection` que levantan dos túneles IPsec con BGP contra el VGW. La EC2 strongSwan se despliega embebiendo `templates/vpn-gateway-strongswan.yml` dentro de un `aws_cloudformation_stack`, con PSKs entregados por AWS Secrets Manager.
 
-## 5. Trade-offs and explicit non-goals
+Desde on-prem, el hostname SQS `sqs.<region>.amazonaws.com` resuelve de forma privada al Interface VPC Endpoint de SQS de la VPC AWS mediante una Private Hosted Zone de Route 53 asociada solo a la VPC on-prem. Una ruta estática `<aws-vpc-cidr> → ENI strongSwan` en la route table on-prem canaliza ese tráfico al túnel VPN. Combinado con la VPC AWS solo privada (sin IGW), la ubicación del Interface VPCE y las reglas del security group de endpoints, **solo los productores que pueden alcanzar el VPCE SQS por la ruta VPN pueden publicar**; los consumidores Fargate en la VPC AWS siguen pudiendo `ReceiveMessage` y `DeleteMessage` por el mismo VPCE desde subnets app.
 
-- **No NAT Gateway** — saves cost and forces all egress through VPC endpoints.
-- **No customer-managed KMS keys** — AWS Academy disallows KMS CMK creation. AWS-owned/managed keys are used everywhere (S3 SSE-S3, DynamoDB SSE-AWS, SQS SSE-SQS, ECR AES256). Checkov findings for this are documented and skipped on the affected resources.
-- **`LabRole` as both task and execution role** — AWS Academy disallows creating new roles. Documented `CKV_AWS_249` skip on `aws_ecs_task_definition`.
-- **On-prem simulation is BGP-only and single-AZ.** `modules/onprem_sim` is intentionally minimal (one public subnet, permissive SG, one EC2 router plus two traffic producers). It can be disabled with `var.enable_onprem_sim = false` to skip both the VPN connection costs and the strongSwan stack rollout. Disable only the producers with `var.enable_onprem_traffic_producers = false`.
-- **No VPC Flow Logs** — intentionally skipped for the lab footprint. Re-enable later when the Checkov `CKV2_AWS_11` finding becomes a hard requirement.
-- **Container image ownership.** The processor image is built in the manual **Deploy** GitHub Actions workflow, tagged with the commit SHA, pushed to ECR, and passed back into Terraform as `image_uri`; it is owned by the Fargate service in `modules/compute`. The API Dockerfile is built for local validation only and is not pushed to ECR because the dashboard API runs as Lambda. The dashboard Dockerfile builds a static export instead of an ECR image; the Deploy workflow syncs that export to the S3 website bucket created by Terraform.
-- **S3 backend with partial config.** `backend.tf` uses partial configuration; the bucket name (`itba-tp-fraud-tfstate-<account-id>`) is supplied at `terraform init` time via `-backend-config` in `make init`. DynamoDB locking is not used in the lab.
+## 4. Trade-offs y no-objetivos explícitos
 
-## 6. How the academic minima are met
+- **Sin NAT Gateway** — ahorra costo y obliga todo el egress por VPC endpoints.
+- **Sin claves KMS administradas por el cliente** — AWS Academy no permite crear CMK. Se usan claves propiedad/gestionadas por AWS en todos lados (S3 SSE-S3, DynamoDB SSE-AWS, SQS SSE-SQS, ECR AES256). Los hallazgos de Checkov están documentados y omitidos en los recursos afectados.
+- **`LabRole` como task role y execution role** — AWS Academy no permite crear roles nuevos. Skip documentado `CKV_AWS_249` en `aws_ecs_task_definition`.
+- **Simulación on-prem solo BGP y single-AZ.** `modules/onprem_sim` es intencionalmente mínimo (una subnet pública, SG permisivo, un router EC2 más dos productores de tráfico). Se puede desactivar con `var.enable_onprem_sim = false` para evitar costos de VPN y el rollout del stack strongSwan. Para desactivar solo los productores: `var.enable_onprem_traffic_producers = false`.
+- **Sin lockdown SQS por `aws:VpcSourceIp` en la cola de ingesta.** El tráfico VPN Site-to-Site cross-VPC hacia un Interface VPCE no rellena las condition keys necesarias para una política de cola confiable; la frontera del lab la dan ubicación de red y reglas de SG.
+- **Sin VPC Flow Logs** — omitido a propósito en la huella del lab. Reactivar cuando el hallazgo Checkov `CKV2_AWS_11` sea un requisito duro.
+- **Propiedad de imágenes de contenedor.** La imagen del processor se construye en el workflow manual **Deploy** de GitHub Actions, se etiqueta con el SHA del commit, se pushea a ECR y se pasa de vuelta a Terraform como `image_uri`; la posee el servicio Fargate en `modules/compute`. El Dockerfile de la API sirve solo para validación local y no se pushea a ECR porque la API del dashboard corre como Lambda. El Dockerfile del dashboard genera un export estático en lugar de imagen ECR; el workflow Deploy sincroniza ese export al bucket S3 del sitio creado por Terraform.
+- **Backend S3 con configuración parcial.** `backend.tf` usa configuración parcial; el nombre del bucket (`itba-tp-fraud-tfstate-<account-id>`) se pasa en `terraform init` vía `-backend-config` en `make init`. No se usa bloqueo DynamoDB en el lab.
 
-| Requirement (from `docs/CONSIGNA.md`) | Where in this repo                                                                                              |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| ≥1 external module                    | `terraform-aws-modules/vpc/aws ~> 5.13` in `modules/network`.                                                    |
-| ≥1 custom module                      | `modules/network`, `modules/queue`, `modules/data_store`, `modules/compute`, `modules/onprem_sim`, `modules/notification`, `modules/results_writer`, `modules/api`, `modules/dashboard` (9). |
-| ≥4 Terraform functions                | `merge`, `format`, `cidrsubnet`, `toset`, `replace`, `length`, `can`, `cidrhost`, `jsonencode`, `contains`, `slice`. |
-| ≥3 meta-arguments                     | `for_each` (gateway and interface endpoints), `lifecycle { ignore_changes }` (ECS service `desired_count`, CFN stack `pAmiId`), `depends_on` (service → SG egress rule, CFN stack → secret versions + VPN), `count` (`module.onprem_sim`), plus `validation` blocks on every variable. |
+## 5. Cómo se cumplen los mínimos académicos
+
+| Requisito (desde `docs/CONSIGNA.md`) | Dónde en este repo                                                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| ≥1 módulo externo                    | `terraform-aws-modules/vpc/aws ~> 5.13` en `modules/network`.                                                   |
+| ≥1 módulo custom                     | `modules/network`, `modules/queue`, `modules/data_store`, `modules/compute`, `modules/onprem_sim`, `modules/notification`, `modules/results_writer`, `modules/api`, `modules/auth`, `modules/dashboard` (10). |
+| ≥4 funciones Terraform               | `merge`, `format`, `cidrsubnet`, `toset`, `replace`, `length`, `can`, `cidrhost`, `jsonencode`, `contains`, `slice`, `templatefile`, `filebase64sha256`, `filemd5`, `nonsensitive`. |
+| ≥3 meta-argumentos                   | `for_each` (gateway e interface endpoints, rutas CORS preflight, Google IdP opcional), `lifecycle { ignore_changes }` (`desired_count` del servicio ECS, `pAmiId` del stack CFN, objetos S3 del dashboard), `lifecycle { create_before_destroy }` (capa Lambda psycopg2), `depends_on` (servicio → regla egress SG, stack CFN → versiones de secret + VPN), `count` (`module.onprem_sim`), más bloques `validation` en cada variable. |
