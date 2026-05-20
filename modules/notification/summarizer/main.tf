@@ -1,5 +1,9 @@
 data "aws_region" "current" {}
 
+data "aws_kms_alias" "lambda" {
+  name = "alias/aws/lambda"
+}
+
 locals {
   module_tags = merge(var.tags, {
     Component = "notification-summarizer"
@@ -50,12 +54,14 @@ resource "aws_lambda_function" "summarizer" {
   # checkov:skip=CKV_AWS_272: Code signing no configurado en lab académico.
   # checkov:skip=CKV_AWS_50: X-Ray tracing deshabilitado en lab.
   # checkov:skip=CKV_AWS_116: Los mensajes quedan en SQS si falla la publicación; la cola tiene DLQ.
-  function_name = local.function_name
-  role          = var.principal_arn
-  runtime       = "python3.12"
-  handler       = "handler.handler"
-  timeout       = 60
-  memory_size   = 256
+  function_name                  = local.function_name
+  role                           = var.principal_arn
+  runtime                        = "python3.12"
+  handler                        = "handler.handler"
+  timeout                        = 60
+  memory_size                    = 256
+  kms_key_arn                    = data.aws_kms_alias.lambda.target_key_arn
+  reserved_concurrent_executions = 2 # AWS Academy account cap is 10 concurrent Lambdas total
 
   filename         = var.package_file
   source_code_hash = filebase64sha256(var.package_file)

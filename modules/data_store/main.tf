@@ -93,6 +93,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "audit" {
     noncurrent_version_expiration {
       noncurrent_days = 30
     }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -141,11 +145,14 @@ resource "aws_db_instance" "results" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
 
-  multi_az                = false
-  backup_retention_period = 0
-  skip_final_snapshot     = true
-  deletion_protection     = false
-  apply_immediately       = true
+  multi_az                            = false
+  backup_retention_period             = 0
+  skip_final_snapshot                 = true
+  deletion_protection                 = false
+  apply_immediately                   = true
+  auto_minor_version_upgrade          = true
+  copy_tags_to_snapshot               = true
+  iam_database_authentication_enabled = true
 
   lifecycle {
     ignore_changes = [password]

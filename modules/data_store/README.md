@@ -95,6 +95,7 @@ resource "aws_vpc_security_group_ingress_rule" "proxy_from_writer" {
 ## Notes for AWS Academy
 
 - **DynamoDB**: AWS Academy does not allow customer-managed KMS keys. The table uses the AWS-owned default key (Checkov `CKV_AWS_119` skipped).
-- **RDS**: Checkov `CKV_AWS_157`, `CKV_AWS_133`, `CKV_AWS_118`, `CKV_AWS_293`, `CKV_AWS_129`, `CKV_AWS_354` are skipped — all are lab cost or Academy restriction trade-offs documented inline.
+- **RDS**: `auto_minor_version_upgrade`, `copy_tags_to_snapshot`, and `iam_database_authentication_enabled` are enabled. Applications still authenticate via RDS Proxy and Secrets Manager (`iam_auth = DISABLED` on the proxy). Checkov `CKV_AWS_157`, `CKV_AWS_133`, `CKV_AWS_118`, `CKV_AWS_293`, `CKV_AWS_129`, `CKV_AWS_354` remain skipped — lab cost or Academy restriction trade-offs documented inline.
+- **Audit S3**: lifecycle includes `abort_incomplete_multipart_upload` after 7 days.
 - The RDS password is generated with `random_password` in the root composition and passed as a sensitive variable. Retrieve it with `terraform output -raw db_password`.
 - The TP requires only one DynamoDB table — there are no GSIs or LSIs by design.

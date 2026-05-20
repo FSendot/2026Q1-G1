@@ -12,7 +12,6 @@ locals {
 
 resource "aws_s3_bucket" "dashboard" {
   # checkov:skip=CKV_AWS_18: Access logging deshabilitado en lab académico.
-  # checkov:skip=CKV_AWS_52: Versionado deshabilitado; el dashboard son archivos estáticos regenerados por Terraform.
   # checkov:skip=CKV2_AWS_62: Sin notificaciones de eventos S3 (lab).
   # checkov:skip=CKV2_AWS_61: Sin lifecycle configuration (lab).
   # checkov:skip=CKV_AWS_144: Sin replicación S3 (lab).
@@ -22,6 +21,14 @@ resource "aws_s3_bucket" "dashboard" {
   tags = merge(local.module_tags, {
     Name = local.bucket_name
   })
+}
+
+resource "aws_s3_bucket_versioning" "dashboard" {
+  bucket = aws_s3_bucket.dashboard.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_website_configuration" "dashboard" {

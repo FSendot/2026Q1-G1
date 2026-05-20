@@ -68,4 +68,5 @@ Provisions the Fargate-based scoring engine: the ECR repository, the ECS Cluster
 
 - All IAM is reused from `LabRole` — the module never creates a role.
 - `force_delete = true` on the ECR repo lets `terraform destroy` succeed even if images were pushed manually.
+- ECR uses `image_tag_mutability = "IMMUTABLE"`; deploy pushes unique tags per commit (`processor-<sha>`).
 - `image_uri = ""` produces a placeholder reference (`<ecr>:placeholder`); the first deployment will fail until you push a real image. This is intentional.

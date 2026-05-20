@@ -5,6 +5,7 @@ Provisions the S3 static website bucket used by the fraud dashboard. Terraform o
 ## Resources
 
 - `aws_s3_bucket.dashboard` — `<project>-dashboard-<account-id>`, force-destroy enabled for the short-lived lab. The account suffix avoids S3 global-name collisions across AWS Academy labs and keeps the Cognito callback URL stable for the active account.
+- `aws_s3_bucket_versioning.dashboard` — versioning enabled on the static website bucket.
 - `aws_s3_bucket_website_configuration.dashboard` — static website hosting with `index.html`.
 - `aws_s3_bucket_public_access_block.dashboard` — public access block relaxed for the public website endpoint.
 - `aws_s3_bucket_policy.dashboard` — allows public `s3:GetObject` on website objects.

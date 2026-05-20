@@ -128,18 +128,24 @@ resource "aws_vpc_security_group_egress_rule" "writer_to_endpoints" {
   tags = local.module_tags
 }
 
+data "aws_kms_alias" "lambda" {
+  name = "alias/aws/lambda"
+}
+
 resource "aws_lambda_function" "writer" {
   # checkov:skip=CKV_AWS_272: Code signing no configurado en lab académico.
   # checkov:skip=CKV_AWS_50: X-Ray tracing deshabilitado en lab.
   # checkov:skip=CKV_AWS_116: DLQ a nivel Lambda no necesario; se usa el DLQ de la cola SQS.
   # checkov:skip=CKV_AWS_117: Lambda desplegada en VPC para acceder a RDS en subnets privadas.
-  function_name = local.function_name
-  role          = var.principal_arn
-  runtime       = "provided.al2023"
-  handler       = "bootstrap"
-  timeout       = 60
-  memory_size   = 1024
-  architectures = ["x86_64"]
+  function_name                  = local.function_name
+  role                           = var.principal_arn
+  runtime                        = "provided.al2023"
+  handler                        = "bootstrap"
+  timeout                        = 60
+  memory_size                    = 1024
+  architectures                  = ["x86_64"]
+  kms_key_arn                    = data.aws_kms_alias.lambda.target_key_arn
+  reserved_concurrent_executions = 5 # AWS Academy account cap is 10 concurrent Lambdas total
 
   filename         = var.package_file
   source_code_hash = filebase64sha256(var.package_file)
