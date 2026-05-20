@@ -3,7 +3,9 @@
 Sistema de detección de fraude en tiempo real desplegado en AWS mediante Terraform.
 Transacciones financieras ingresan desde un sitio on-premise simulado, son procesadas por un motor de scoring corriendo en Fargate, y los resultados quedan disponibles en un dashboard web.
 
-La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
+La arquitectura detallada está en [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+![Diagrama de arquitectura AWS](img/architecture_diagram.png)
 
 **Flujo de datos:**
 
@@ -191,7 +193,7 @@ Toda la capa de persistencia del sistema en un único módulo:
 - **RDS PostgreSQL 17.4** `itba-tp-fraud-results-db`: `[aws_db_instance.results](modules/data_store/main.tf#L118)` — resultados de scoring. Acceso exclusivo desde la VPC vía RDS Proxy.
 - **Secrets Manager**: credenciales RDS para el proxy.
 - **RDS Proxy**: pool entre Lambdas y RDS en `db.t3.micro`.
-- Las reglas cruzadas de security group con Lambdas/RDS están en la raíz — `[main.tf](main.tf#L208)` — para evitar dependencias circulares entre módulos.
+- Las reglas cruzadas de security group con Lambdas/RDS están en la raíz — [`security_groups.tf`](security_groups.tf) — para evitar dependencias circulares entre módulos.
 
 ---
 
@@ -267,13 +269,13 @@ Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, ap
 | `merge()`              | Todos los módulos          | Combinar `common_tags` con tags del recurso  |
 | `cidrsubnet()`         | `modules/network`          | CIDRs de subnets privadas                    |
 | `toset()`              | `modules/network`          | Set para `for_each` en gateway endpoints     |
-| `slice()`              | `main.tf`                  | Primeras 2 AZs de la región                  |
+| `slice()`              | `locals.tf`                | Primeras 2 AZs de la región                  |
 | `jsonencode()`         | Colas, data store          | Políticas IAM en JSON                        |
 | `contains()`           | Variables con `validation` | Rangos permitidos                            |
 | `can()` + `cidrhost()` | Variables con `validation` | CIDRs IPv4 válidos                           |
 | `replace()`            | `modules/network`          | Normalizar nombres de endpoints              |
 | `templatefile()`       | `modules/dashboard`        | Inyectar URL de API en `config.js`           |
-| `filebase64sha256()`   | `main.tf`                  | Hash de la capa psycopg2                     |
+| `filebase64sha256()`   | `lambdas.tf`               | Hash de la capa psycopg2                     |
 | `filemd5()`            | `modules/dashboard`        | Hash de archivos estáticos                   |
 | `length()`             | Validaciones y red         | Contar elementos en listas                   |
 
@@ -286,7 +288,7 @@ Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, ap
 | `for_each`                            | `modules/network` — VPC Endpoints          | Un endpoint por servicio desde un mapa/set                      |
 | `count`                               | `main.tf` — `module.onprem_sim`            | Activar o no la simulación on-prem                              |
 | `lifecycle { ignore_changes }`        | ECS service, RDS, objetos S3 del dashboard | Delegar capacidad a autoscaling / CI / evitar drift de password |
-| `lifecycle { create_before_destroy }` | Lambda Layer psycopg2                      | Nueva versión antes de destruir la anterior                     |
+| `lifecycle { create_before_destroy }` | `lambdas.tf` — Lambda Layer psycopg2       | Nueva versión antes de destruir la anterior                     |
 | `depends_on`                          | ECS service, stack strongSwan              | Ordenar dependencias explícitas                                 |
 | `validation`                          | Variables                                  | Validar en `terraform plan`                                     |
 
@@ -297,7 +299,11 @@ Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, ap
 
 ```
 .
-├── main.tf                  # Composición raíz
+├── main.tf                  # Composición raíz (solo module blocks)
+├── providers.tf             # Provider AWS y data sources globales
+├── locals.tf                # Proyecto, tags, AZs, URLs del dashboard
+├── security_groups.tf       # Reglas SG cruzadas proxy ↔ RDS ↔ Lambdas
+├── lambdas.tf               # Password RDS, capa psycopg2, archive_file
 ├── variables.tf
 ├── outputs.tf
 ├── versions.tf
@@ -307,6 +313,7 @@ Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, ap
 ├── app/                     # processor, api, results_writer, notification, dashboard
 ├── layers/psycopg2/         # Capa Lambda (generada en CI)
 ├── templates/               # CloudFormation strongSwan on-prem
+├── img/                     # Capturas del lab y diagrama de arquitectura
 └── ARCHITECTURE.md          # Arquitectura, flujos y trade-offs del lab
 ```
 

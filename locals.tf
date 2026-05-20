@@ -1,0 +1,18 @@
+locals {
+  project         = "itba-tp-fraud"
+  vpc_cidr        = "10.0.0.0/16"
+  onprem_vpc_cidr = "192.168.0.0/16"
+
+  common_tags = {
+    Project   = local.project
+    ManagedBy = "terraform"
+  }
+
+  # Primeras dos AZs de la región (orden estable, conocido en plan) para
+  # evitar count/for_each que dependan de random_shuffle.
+  azs = slice(data.aws_availability_zones.available.names, 0, 2)
+
+  dashboard_app_url       = format("https://%s-dashboard-%s.s3.%s.amazonaws.com/index.html", local.project, data.aws_caller_identity.current.account_id, data.aws_region.current.name)
+  dashboard_callback_urls = [local.dashboard_app_url, "http://localhost:3000/"]
+  dashboard_logout_urls   = [local.dashboard_app_url, "http://localhost:3000/"]
+}

@@ -66,8 +66,9 @@ module "vpc" {
   }
 }
 
+# for_each keys must be known at plan time; route table IDs from the VPC module are apply-time only.
 resource "aws_vpn_gateway_route_propagation" "endpoint_route_tables" {
-  for_each = toset(module.vpc.intra_route_table_ids)
+  for_each = { for idx, az in var.azs : az => module.vpc.intra_route_table_ids[idx] }
 
   route_table_id = each.value
   vpn_gateway_id = module.vpc.vgw_id

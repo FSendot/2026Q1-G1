@@ -1,44 +1,3 @@
-provider "aws" {
-  region = "us-east-1"
-
-  default_tags {
-    tags = local.common_tags
-  }
-}
-
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
-data "aws_region" "current" {}
-data "aws_caller_identity" "current" {}
-
-# AWS Academy expone un rol pre-creado (LabRole). Esta data source lo
-# resuelve para reutilizarlo como task_role y execution_role en ECS,
-# evitando crear nuevos roles IAM (restricción del sandbox).
-data "aws_iam_role" "lab" {
-  name = "LabRole"
-}
-
-locals {
-  project         = "itba-tp-fraud"
-  vpc_cidr        = "10.0.0.0/16"
-  onprem_vpc_cidr = "192.168.0.0/16"
-
-  common_tags = {
-    Project   = local.project
-    ManagedBy = "terraform"
-  }
-
-  # Primeras dos AZs de la región (orden estable, conocido en plan) para
-  # evitar count/for_each que dependan de random_shuffle.
-  azs = slice(data.aws_availability_zones.available.names, 0, 2)
-
-  dashboard_app_url       = format("https://%s-dashboard-%s.s3.%s.amazonaws.com/index.html", local.project, data.aws_caller_identity.current.account_id, data.aws_region.current.name)
-  dashboard_callback_urls = [local.dashboard_app_url, "http://localhost:3000/"]
-  dashboard_logout_urls   = [local.dashboard_app_url, "http://localhost:3000/"]
-}
-
 module "network" {
   source = "./modules/network"
 
@@ -102,23 +61,6 @@ module "compute" {
   results_queue_url     = module.results_writer.queue_url
   fraud_alert_queue_url = module.notification.fraud_alert_queue_url
   audit_bucket_name     = module.data_store.audit_bucket_name
-}
-
-resource "random_password" "db" {
-  length  = 20
-  special = false
-}
-
-resource "aws_lambda_layer_version" "psycopg2" {
-  filename                 = "layers/psycopg2/psycopg2-layer.zip"
-  layer_name               = format("%s-psycopg2", local.project)
-  source_code_hash         = filebase64sha256("layers/psycopg2/psycopg2-layer.zip")
-  compatible_runtimes      = ["python3.12"]
-  compatible_architectures = ["x86_64"]
-
-  lifecycle {
-    create_before_destroy = true
-  }
 }
 
 module "notification" {
@@ -202,78 +144,6 @@ module "dashboard" {
   app_js_path                = "${path.root}/app/dashboard/app.js"
   config_js_template_path    = "${path.root}/app/dashboard/config.js.tpl"
   tags                       = local.common_tags
-}
-
-# Proxy ↔ RDS
-
-resource "aws_vpc_security_group_egress_rule" "proxy_to_rds" {
-  security_group_id            = module.data_store.proxy_security_group_id
-  description                  = "PostgreSQL desde proxy hacia RDS"
-  referenced_security_group_id = module.data_store.rds_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
-
-  tags = local.common_tags
-}
-
-resource "aws_vpc_security_group_ingress_rule" "rds_from_proxy" {
-  security_group_id            = module.data_store.rds_security_group_id
-  description                  = "PostgreSQL desde RDS Proxy"
-  referenced_security_group_id = module.data_store.proxy_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
-
-  tags = local.common_tags
-}
-
-# Lambda results-writer ↔ Proxy
-
-resource "aws_vpc_security_group_egress_rule" "writer_lambda_to_proxy" {
-  security_group_id            = module.results_writer.lambda_security_group_id
-  description                  = "PostgreSQL desde Lambda results-writer hacia RDS Proxy"
-  referenced_security_group_id = module.data_store.proxy_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
-
-  tags = local.common_tags
-}
-
-resource "aws_vpc_security_group_ingress_rule" "proxy_from_writer_lambda" {
-  security_group_id            = module.data_store.proxy_security_group_id
-  description                  = "PostgreSQL desde Lambda results-writer"
-  referenced_security_group_id = module.results_writer.lambda_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
-
-  tags = local.common_tags
-}
-
-# Lambda api ↔ Proxy
-
-resource "aws_vpc_security_group_egress_rule" "api_lambda_to_proxy" {
-  security_group_id            = module.api.lambda_security_group_id
-  description                  = "PostgreSQL desde Lambda API hacia RDS Proxy"
-  referenced_security_group_id = module.data_store.proxy_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
-
-  tags = local.common_tags
-}
-
-resource "aws_vpc_security_group_ingress_rule" "proxy_from_api_lambda" {
-  security_group_id            = module.data_store.proxy_security_group_id
-  description                  = "PostgreSQL desde Lambda API"
-  referenced_security_group_id = module.api.lambda_security_group_id
-  ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
-
-  tags = local.common_tags
 }
 
 # Simulación de un sitio on-premise: una VPC aparte con un EC2 strongSwan
