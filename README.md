@@ -17,7 +17,30 @@ La arquitectura detallada está en `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 Toda la operación del lab (deploy, pruebas, destrucción) se hace desde **GitHub Actions**.
 
-Para mantener una rama de entrega sincronizada con un repositorio/fork usado para el PR de la cátedra, ver `[docs/SUBMISSION_SYNC.md](docs/SUBMISSION_SYNC.md)`.
+---
+
+## Prerrequisitos
+
+| Herramienta | Versión / nota |
+| ----------- | -------------- |
+| Terraform | `terraform -v` → mínimo `~> 1.9` (ver [`versions.tf`](versions.tf)) |
+| AWS CLI | `aws --version` — [instalación](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+
+El despliegue real del lab se ejecuta en **GitHub Actions** con los secrets del repositorio (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, etc.). No es obligatorio configurar `aws configure` en la máquina local salvo que quieras correr Terraform o la CLI contra la cuenta del lab por tu cuenta.
+
+Documentación de arquitectura y decisiones de diseño: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+---
+
+## Integrantes
+
+| Nombre | Legajo |
+| ------ | ------ |
+| Campoli, Lucas | 63295 |
+| Fernandez Dinardo, Juan Ignacio | 62466 |
+| Mutz, Matías Ignacio | 63590 |
+| Sendot, Francisco Nicolás | 62351 |
+| Taurian, Magdalena | 62828 |
 
 ---
 
@@ -284,9 +307,7 @@ Cognito User Pool (email), Hosted UI, dominio `itba-fraud-auth-<account-id>`, ap
 ├── app/                     # processor, api, results_writer, notification, dashboard
 ├── layers/psycopg2/         # Capa Lambda (generada en CI)
 ├── templates/               # CloudFormation strongSwan on-prem
-├── ARCHITECTURE.md
-├── CONTRIBUTING.md
-└── docs/                    # STYLE_GUIDE, NAMING, WORKFLOW, SECURITY, SUBMISSION_SYNC, CONSIGNA
+└── ARCHITECTURE.md          # Arquitectura, flujos y trade-offs del lab
 ```
 
-Documentación operativa adicional para contribuidores: `[CONTRIBUTING.md](CONTRIBUTING.md)`, `[docs/WORKFLOW.md](docs/WORKFLOW.md)`, `[docs/SUBMISSION_SYNC.md](docs/SUBMISSION_SYNC.md)`.
+Arquitectura y decisiones de diseño: [`ARCHITECTURE.md`](ARCHITECTURE.md).
