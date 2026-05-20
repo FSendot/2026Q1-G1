@@ -900,38 +900,49 @@
     const p = gfParams();
     Object.keys(CHART_SPECS).forEach(setChartLoading);
 
-    const [statsR, tsR, weekR, minR, secR, fraudR] = await Promise.allSettled([
-      apiFetch("/stats?" + p),
-      apiFetch("/stats/timeseries?" + CHART_SPECS.hourly.buildQuery(p)),
-      apiFetch("/stats/timeseries?" + CHART_SPECS.weekly.buildQuery(p)),
-      apiFetch("/stats/timeseries?" + CHART_SPECS.minute.buildQuery(p)),
-      apiFetch("/stats/timeseries?" + CHART_SPECS.second.buildQuery(p)),
-      apiFetch("/transactions?" + gfParams({
+    let stats = null;
+    try {
+      stats = normalizeEnvelope(await apiFetch("/stats?" + p));
+      renderKpis(stats);
+      renderPie(stats);
+    } catch (_) {
+      // Preserve existing behavior: stats failure is silent and leaves the section unchanged.
+    }
+
+    try {
+      renderHourlyChart(normalizeArrayPayload(await apiFetch("/stats/timeseries?" + CHART_SPECS.hourly.buildQuery(p))));
+    } catch (e) {
+      setChartError("hourly", e.message || "Error al cargar.");
+    }
+
+    try {
+      renderWeeklyChart(normalizeArrayPayload(await apiFetch("/stats/timeseries?" + CHART_SPECS.weekly.buildQuery(p))));
+    } catch (e) {
+      setChartError("weekly", e.message || "Error al cargar.");
+    }
+
+    try {
+      renderMinuteChart(normalizeArrayPayload(await apiFetch("/stats/timeseries?" + CHART_SPECS.minute.buildQuery(p))));
+    } catch (e) {
+      setChartError("minute", e.message || "Error al cargar.");
+    }
+
+    try {
+      renderSecondChart(normalizeArrayPayload(await apiFetch("/stats/timeseries?" + CHART_SPECS.second.buildQuery(p))));
+    } catch (e) {
+      setChartError("second", e.message || "Error al cargar.");
+    }
+
+    try {
+      renderRecentFraud(normalizeArrayPayload(await apiFetch("/transactions?" + gfParams({
         is_fraud: "true",
         limit: 10,
         sort_by: "fraud_score",
         sort_order: "desc",
-      })),
-    ]);
-
-    if (statsR.status === "fulfilled") {
-      const stats = normalizeEnvelope(statsR.value);
-      renderKpis(stats);
-      renderPie(stats);
+      }))));
+    } catch (_) {
+      // Preserve existing behavior: recent fraud is best-effort and silent on failure.
     }
-    if (tsR.status === "fulfilled") renderHourlyChart(normalizeArrayPayload(tsR.value));
-    else if (tsR.status === "rejected") setChartError("hourly", tsR.reason?.message || "Error al cargar.");
-
-    if (weekR.status === "fulfilled") renderWeeklyChart(normalizeArrayPayload(weekR.value));
-    else if (weekR.status === "rejected") setChartError("weekly", weekR.reason?.message || "Error al cargar.");
-
-    if (minR.status === "fulfilled") renderMinuteChart(normalizeArrayPayload(minR.value));
-    else if (minR.status === "rejected") setChartError("minute", minR.reason?.message || "Error al cargar.");
-
-    if (secR.status === "fulfilled") renderSecondChart(normalizeArrayPayload(secR.value));
-    else if (secR.status === "rejected") setChartError("second", secR.reason?.message || "Error al cargar.");
-
-    if (fraudR.status === "fulfilled") renderRecentFraud(normalizeArrayPayload(fraudR.value));
   }
 
   function renderKpis(stats) {
