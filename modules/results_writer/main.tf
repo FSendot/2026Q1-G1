@@ -128,11 +128,8 @@ resource "aws_vpc_security_group_egress_rule" "writer_to_endpoints" {
   tags = local.module_tags
 }
 
-data "aws_kms_alias" "lambda" {
-  name = "alias/aws/lambda"
-}
-
 resource "aws_lambda_function" "writer" {
+  # checkov:skip=CKV_AWS_173: AWS Academy no expone alias/aws/lambda; env vars usan cifrado por defecto del servicio.
   # checkov:skip=CKV_AWS_272: Code signing no configurado en lab académico.
   # checkov:skip=CKV_AWS_50: X-Ray tracing deshabilitado en lab.
   # checkov:skip=CKV_AWS_116: DLQ a nivel Lambda no necesario; se usa el DLQ de la cola SQS.
@@ -144,7 +141,6 @@ resource "aws_lambda_function" "writer" {
   timeout                        = 60
   memory_size                    = 1024
   architectures                  = ["x86_64"]
-  kms_key_arn                    = data.aws_kms_alias.lambda.target_key_arn
   reserved_concurrent_executions = 5 # AWS Academy account cap is 10 concurrent Lambdas total
 
   filename         = var.package_file
