@@ -45,6 +45,9 @@ module "vpc" {
   enable_nat_gateway = false
   enable_vpn_gateway = true
 
+  # Una route table intra por AZ (default del módulo VPC es false → una sola RT compartida).
+  create_multiple_intra_route_tables = true
+
   propagate_private_route_tables_vgw = true
 
   manage_default_security_group  = true
@@ -66,7 +69,7 @@ module "vpc" {
   }
 }
 
-# for_each keys must be known at plan time; route table IDs from the VPC module are apply-time only.
+# Claves = AZ (estáticas en plan); requiere create_multiple_intra_route_tables = true (1 RT por subnet intra).
 resource "aws_vpn_gateway_route_propagation" "endpoint_route_tables" {
   for_each = { for idx, az in var.azs : az => module.vpc.intra_route_table_ids[idx] }
 
